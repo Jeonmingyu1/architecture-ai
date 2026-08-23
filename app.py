@@ -35,32 +35,53 @@ def extract_score(result_text):
             return val
     return 0
 
-# 4. 상단 대메뉴 탭 (딱 2개로 분리)
+# 4. 사이드바: 챕터 및 학습 범위 설정 (깔끔하게 정리)
+st.sidebar.header("📚 학습 범위 설정")
+
+scope_type = st.sidebar.radio("범위 선택 방식", ["전체 챕터에서 랜덤", "특정 챕터 직접 선택"])
+
+target_df = pd.DataFrame()
+
+if scope_type == "특정 챕터 직접 선택":
+    major_list = df['대단원'].unique().tolist()
+    selected_major = st.sidebar.selectbox("대단원", major_list)
+    
+    sub_list = df[df['대단원'] == selected_major]['중단원'].unique().tolist()
+    selected_sub = st.sidebar.selectbox("중단원", sub_list)
+    
+    target_df = df[df['중단원'] == selected_sub]
+else:
+    target_df = df
+
+st.sidebar.divider()
+st.sidebar.info(f"선택된 범위의 총 문제수: **{len(target_df)}개**")
+
+# 5. 상단 탭 나누기
 tab1, tab2 = st.tabs(["📝 문제 풀이 및 AI 채점", "📊 나의 학습 기록 & 오답노트"])
 
 # ==================== [탭 1: 문제 풀이] ====================
 with tab1:
-    # 상단에 깔끔하게 모드 선택 배치 (사이드바 복잡함 제거)
-    col_mode1, col_mode2 = st.columns(2)
-    with col_mode1:
+    col1, col2 = st.columns([2, 1])
+    with col1:
         solve_type = st.radio("📌 학습 방식을 선택하세요:", ["📑 시험지 모드 (여러 문제 한번에 풀기)", "🔍 한 문제씩 집중 풀기"], horizontal=True)
-    with col_mode2:
-        num_q = st.slider("🎲 무작위 출제 문항 수", min_value=5, max_value=20, value=5, step=5)
+    with col2:
+        num_q = st.number_input("출제 문항 수", min_value=1, max_value=max(1, len(target_df)), value=min(5, len(target_df)))
 
-    # 매번 새로 고칠 수 있는 랜덤 문제 세션 관리
-    if 'exam_df' not in st.session_state or st.button("🔄 새로운 문제 세트 불러오기"):
-        st.session_state['exam_df'] = df.sample(n=min(num_q, len(df))).reset_index(drop=True)
+    # 문제 세트 갱신 버튼
+    if 'current_exam_df' not in st.session_state or st.button("🔄 새로운 문제 불러오기"):
+        st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
     
-    current_df = st.session_state['exam_df']
+    # 범위가 바뀌었을 때 반영하기 위한 처리
+    active_df = st.session_state['current_exam_df']
     st.divider()
 
     # --- 모드 1: 시험지 모드 (여러 문제 한번에) ---
     if solve_type == "📑 시험지 모드 (여러 문제 한번에 풀기)":
-        st.markdown("👇 아래 문제들을 읽고 각각 답안을 작성한 뒤, 맨 아래 **[일괄 채점하기]** 버튼을 누르세요.")
+        st.markdown("👇 아래 문제들을 읽고 각각 답안을 작성한 뒤, 맨 아래 **[전체 답안 일괄 채점 및 저장]** 버튼을 누르세요.")
         
         user_answers = {}
-        for idx, row in current_df.iterrows():
-            st.markdown(f"**Q{idx+1}. [{row['대단원']}] {row['문제 내용']}**")
+        for idx, row in active_df.iterrows():
+            st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
             ans = st.text_area(f"답안 입력 (Q{idx+1})", key=f"ans_{idx}", height=100)
             user_answers[idx] = {
                 "question": row['문제 내용'],
@@ -105,7 +126,6 @@ with tab1:
                         
                     batch_results.append({"question": data['question'], "user_ans": data['user_ans'], "score": score, "result": res_text})
                     
-                    # CSV 저장
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                         writer = csv.writer(f)
                         if not file_exists:
@@ -121,51 +141,52 @@ with tab1:
 
     # --- 모드 2: 한 문제씩 집중 풀기 ---
     else:
-        q_list = current_df['문제 내용'].tolist()
-        selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list)
-        
-        row_data = current_df[current_df['문제 내용'] == selected_q].iloc[0]
-        
-        st.info(f"**선택된 문제:** {selected_q}")
-        user_ans = st.text_area("✍️ 정답을 입력하세요:", height=120)
+        q_list = active_df['문제 내용'].tolist()
+        if not q_list:
+            st.warning("선택된 범위에 문제가 없습니다.")
+        else:
+            selected_q = st.selectbox("📌 문제를 선택하세요:", q_list)
+            row_data = active_df[active_df['문제 내용'] == selected_q].iloc[0]
+            
+            st.info(f"**선택된 문제:** {selected_q}")
+            user_ans = st.text_area("✍️ 정답을 입력하세요:", height=120)
 
-        if st.button("🤖 AI 채점 요청", type="primary"):
-            if not user_ans:
-                st.warning("답안을 입력해주세요!")
-            else:
-                with st.spinner("채점 중..."):
-                    prompt = f"""
-                    너는 건축기사 실기 수석 채점관이야.
-                    [문제]: {selected_q}
-                    [모범 답안]: {row_data['모범 답안']}
-                    [상세 해설]: {row_data['해설']}
-                    [학생 답안]: {user_ans}
-                    
-                    핵심 키워드 포함 여부를 엄격히 평가해 0~100점의 점수를 매기고 피드백해줘.
-                    반드시 아래 형식으로 출력할 것:
-                    1. 최종 점수: XX점
-                    2. 키워드 포함 여부: (...)
-                    3. 채점 상세 평가: (...)
-                    """
-                    response = client.chat.completions.create(
-                        model="gemini-3.6-flash",
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    result_text = response.choices[0].message.content
-                    score = extract_score(result_text)
+            if st.button("🤖 AI 채점 요청", type="primary"):
+                if not user_ans:
+                    st.warning("답안을 입력해주세요!")
+                else:
+                    with st.spinner("채점 중..."):
+                        prompt = f"""
+                        너는 건축기사 실기 수석 채점관이야.
+                        [문제]: {selected_q}
+                        [모범 답안]: {row_data['모범 답안']}
+                        [상세 해설]: {row_data['해설']}
+                        [학생 답안]: {user_ans}
+                        
+                        핵심 키워드 포함 여부를 엄격히 평가해 0~100점의 점수를 매기고 피드백해줘.
+                        반드시 아래 형식으로 출력할 것:
+                        1. 최종 점수: XX점
+                        2. 키워드 포함 여부: (...)
+                        3. 채점 상세 평가: (...)
+                        """
+                        response = client.chat.completions.create(
+                            model="gemini-3.6-flash",
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        result_text = response.choices[0].message.content
+                        score = extract_score(result_text)
 
-                    st.markdown("### 📋 채점 결과")
-                    st.markdown(result_text)
+                        st.markdown("### 📋 채점 결과")
+                        st.markdown(result_text)
 
-                    # 결과 저장
-                    file_name = 'results.csv'
-                    file_exists = os.path.isfile(file_name)
-                    with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
-                        writer = csv.writer(f)
-                        if not file_exists:
-                            writer.writerow(['선택한문제', '학생답안', '점수', 'AI채점결과'])
-                        writer.writerow([selected_q, user_ans, score, result_text.replace('\n', ' ')])
-                    st.success("저장 완료!")
+                        file_name = 'results.csv'
+                        file_exists = os.path.isfile(file_name)
+                        with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
+                            writer = csv.writer(f)
+                            if not file_exists:
+                                writer.writerow(['선택한문제', '학생답안', '점수', 'AI채점결과'])
+                            writer.writerow([selected_q, user_ans, score, result_text.replace('\n', ' ')])
+                        st.success("저장 완료!")
 
 # ==================== [탭 2: 학습 분석 & 오답노트] ====================
 with tab2:
