@@ -58,32 +58,43 @@ if current_mode not in scope_options:
 
 default_idx = scope_options.index(current_mode)
 
-# 레이아웃 비율 조정 (랜덤 버튼 공간 확보)
 c_scope, c_major, c_num, c_btn = st.columns([1.5, 1.5, 1, 1.2])
 
 with c_scope:
     scope_type = st.selectbox("출제 범위 선택", scope_options, index=default_idx, key="scope_selector")
 
+# 사용자가 셀렉트박스를 직접 바꿨을 때 세션 반영
 if scope_type != st.session_state['scope_mode']:
     st.session_state['scope_mode'] = scope_type
     if scope_type != "🚨 자주 틀린 취약 대단원 집중 공략":
         st.session_state['target_weak_major'] = None
     if 'current_exam_df' in st.session_state:
         del st.session_state['current_exam_df']
+    st.rerun()
 
 target_df = pd.DataFrame()
 
 if scope_type == "대단원별 선택":
-    st.session_state['target_weak_major'] = None
     with c_major:
         major_list = df['대단원'].unique().tolist()
         selected_major = st.selectbox("대단원 선택", major_list)
     
     target_df = df[df['대단원'] == selected_major]
-    active_df = target_df.reset_index(drop=True)
     
     with c_num:
-        st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
+        num_q = st.number_input("추출 문항 수", min_value=1, max_value=max(1, len(target_df)), value=min(5, len(target_df)), key="num_q_major")
+    
+    with c_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🎲 문제 뽑기", use_container_width=True, key="btn_major"):
+            st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
+            st.session_state['messages'] = []
+            st.rerun()
+
+    if 'current_exam_df' not in st.session_state or len(st.session_state['current_exam_df']) == 0:
+        st.session_state['current_exam_df'] = target_df.sample(n=min(num_q, len(target_df))).reset_index(drop=True)
+    
+    active_df = st.session_state['current_exam_df']
 
 elif scope_type == "🚨 자주 틀린 취약 대단원 집중 공략":
     weak_major = st.session_state['target_weak_major']
@@ -93,13 +104,24 @@ elif scope_type == "🚨 자주 틀린 취약 대단원 집중 공략":
             st.markdown(f"<br>🚨 대단원: <b>{weak_major}</b>", unsafe_allow_html=True)
             target_df = df[df['대단원'] == weak_major]
         else:
-            st.markdown("<br>⚠️ <b>선택된 취약 대단원이 없습니다.</b>", unsafe_allow_html=True)
+            st.markdown("<br>⚠️ <b>지정된 취약 대단원 없음</b>", unsafe_allow_html=True)
             target_df = pd.DataFrame()
             
-    active_df = target_df.reset_index(drop=True)
-    
-    with c_num:
-        st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
+    if not target_df.empty:
+        with c_num:
+            num_q = st.number_input("추출 문항 수", min_value=1, max_value=max(1, len(target_df)), value=min(5, len(target_df)), key="num_q_weak")
+        with c_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🎲 문제 뽑기", use_container_width=True, key="btn_weak"):
+                st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
+                st.session_state['messages'] = []
+                st.rerun()
+                
+        if 'current_exam_df' not in st.session_state:
+            st.session_state['current_exam_df'] = target_df.sample(n=min(num_q, len(target_df))).reset_index(drop=True)
+        active_df = st.session_state['current_exam_df']
+    else:
+        active_df = pd.DataFrame()
 
 else:  # 전체 챕터 랜덤 모드
     st.session_state['target_weak_major'] = None
@@ -107,14 +129,13 @@ else:  # 전체 챕터 랜덤 모드
         st.markdown("<br><b>전체 데이터베이스 대상</b>", unsafe_allow_html=True)
     
     with c_num:
-        num_q = st.number_input("추출 문항 수", min_value=1, max_value=max(1, len(df)), value=min(5, len(df)))
+        num_q = st.number_input("추출 문항 수", min_value=1, max_value=max(1, len(df)), value=min(5, len(df)), key="num_q_all")
 
     target_df = df
     
-    # 🎲 전체 챕터 랜덤 모드일 때만 활성화되는 랜덤 문제 뽑기 버튼
     with c_btn:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🎲 새로운 랜덤 문제 뽑기", use_container_width=True):
+        if st.button("🎲 새로운 랜덤 문제 뽑기", use_container_width=True, key="btn_all"):
             st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
             st.session_state['messages'] = []
             st.rerun()
@@ -135,7 +156,7 @@ with main_tab1:
     
     q_list = active_df['문제 내용'].tolist() if not active_df.empty else []
     if not q_list:
-        st.warning("선택된 범위에 문제가 없거나 집중 공략할 챕터가 지정되지 않았습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 누르거나 범위를 다시 선택해주세요.")
+        st.warning("선택된 범위에 문제가 없거나 집중 공략할 대단원이 지정되지 않았습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 눌러주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list)
         row_data = active_df[active_df['문제 내용'] == selected_q].iloc[0]
@@ -332,6 +353,8 @@ with main_tab3:
                     if st.button(f"🎯 집중 공략", key=f"weak_major_btn_{idx}"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 자주 틀린 취약 대단원 집중 공략"
+                        if 'current_exam_df' in st.session_state:
+                            del st.session_state['current_exam_df']
                         st.rerun()
         
         st.divider()
