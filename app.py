@@ -22,8 +22,7 @@ except FileNotFoundError:
     st.error("⚠️ 'data.csv' 파일이 없습니다. ai_project 폴더 안에 data.csv 파일을 먼저 만들어주세요!")
     st.stop()
 
-# --- 점수 추출 헬퍼 함수 ---
-# CSV에 챕터 정보가 없을 경우를 대비해 원본 df와 문제를 매칭하기 위한 함수 추가
+# --- 점수 추출 및 챕터 매핑 헬퍼 함수 ---
 def find_chapter_info(q_text, full_df):
     matched = full_df[full_df['문제 내용'] == q_text]
     if not matched.empty:
@@ -44,7 +43,6 @@ def extract_score(result_text):
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
 
-# 세션에 취약 챕터 집중 공략 요청이 들어온 경우 처리
 if 'target_weak_sub' not in st.session_state:
     st.session_state['target_weak_sub'] = None
 
@@ -61,7 +59,6 @@ with c_scope:
 
 target_df = pd.DataFrame()
 
-# 범위 선택 방식이 바뀔 때 세션 초기화용 키 체크
 if 'last_scope' not in st.session_state:
     st.session_state['last_scope'] = scope_type
 
@@ -71,7 +68,7 @@ if st.session_state['last_scope'] != scope_type:
         del st.session_state['current_exam_df']
 
 if scope_type == "특정 챕터 선택":
-    st.session_state['target_weak_sub'] = None # 초기화
+    st.session_state['target_weak_sub'] = None
     with c_major:
         major_list = df['대단원'].unique().tolist()
         selected_major = st.selectbox("대단원", major_list)
@@ -296,16 +293,13 @@ with main_tab3:
         # --- 취약 챕터 자동 분석 ---
         st.subheader("🚨 AI가 분석한 자주 틀리는 취약 챕터 (오답노트 기반)")
         
-        # 기록된 문제들에 대단원/중단원 매핑
         res_df['대단원'], res_df['중단원'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
         
-        # 챕터별 평균 점수 계산
         chapter_stats = res_df.groupby('중단원').agg(
             평균점수=('점수', 'mean'),
             풀이횟수=('점수', 'count')
         ).reset_index()
         
-        # 점수가 낮은 순서대로 정렬 (취약 챕터 추출)
         weak_chapters = chapter_stats.sort_values(by='평균점수', ascending=True)
         
         if not weak_chapters.empty:
@@ -318,7 +312,7 @@ with main_tab3:
                 
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
-                    st.markdown(f"- **{sub_name}** (풀이 횟수: {count회}, 평균 점수: **{avg_s:.1f}점**)")
+                    st.markdown(f"- **{sub_name}** (풀이 횟수: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
                     if st.button(f"🎯 이 챕터 집중 공략", key=f"weak_btn_{idx}"):
                         st.session_state['target_weak_sub'] = sub_name
