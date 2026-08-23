@@ -35,7 +35,7 @@ def extract_score(result_text):
     return 0
 
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
-st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
+st.markdown("### 🎛️ 학습 범위 및 출제 설정")
 c_scope, c_major, c_sub, c_num = st.columns([1.5, 1.5, 1.5, 1])
 
 with c_scope:
@@ -71,7 +71,7 @@ if 'current_exam_df' not in st.session_state or st.button("🔄 새로운 문제
 active_df = st.session_state['current_exam_df']
 
 # ==================== [메인 대메뉴 탭] ====================
-main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 2단계: 문제 풀기 & AI 채팅", "📑 3단계: 시험지 모드 (일괄 풀이)", "📊 나의 학습 기록 & 오답노트"])
+main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 문제 풀기 & AI 채팅", "📑 시험지 모드 (일괄 풀이)", "📊 나의 학습 기록 & 오답노트"])
 
 # ==================== [탭 1: 한 문제씩 풀기 + 이어서 질문하기] ====================
 with main_tab1:
