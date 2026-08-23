@@ -40,34 +40,45 @@ def extract_score(result_text):
             return val
     return 0
 
+# ==================== [세션 상태 초기화] ====================
+if 'target_weak_major' not in st.session_state:
+    st.session_state['target_weak_major'] = None
+if 'target_weak_sub' not in st.session_state:
+    st.session_state['target_weak_sub'] = None
+if 'scope_mode' not in st.session_state:
+    st.session_state['scope_mode'] = "전체 챕터 랜덤"
+
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
 
-if 'target_weak_sub' not in st.session_state:
-    st.session_state['target_weak_sub'] = None
-
 scope_options = ["전체 챕터 랜덤", "특정 챕터 선택"]
-default_scope_idx = 0
 if st.session_state['target_weak_sub']:
     scope_options.append("🚨 자주 틀린 취약 챕터 집중 공략")
-    default_scope_idx = 2
+
+current_mode = st.session_state['scope_mode']
+if current_mode not in scope_options:
+    current_mode = "전체 챕터 랜덤"
+    st.session_state['scope_mode'] = current_mode
+
+default_idx = scope_options.index(current_mode)
 
 c_scope, c_major, c_sub, c_num = st.columns([1.5, 1.5, 1.5, 1])
 
 with c_scope:
-    scope_type = st.selectbox("출제 범위 선택", scope_options, index=default_scope_idx, key="scope_selector")
+    scope_type = st.selectbox("출제 범위 선택", scope_options, index=default_idx, key="scope_selector")
 
-target_df = pd.DataFrame()
-
-if 'last_scope' not in st.session_state:
-    st.session_state['last_scope'] = scope_type
-
-if st.session_state['last_scope'] != scope_type:
-    st.session_state['last_scope'] = scope_type
+if scope_type != st.session_state['scope_mode']:
+    st.session_state['scope_mode'] = scope_type
+    if scope_type != "🚨 자주 틀린 취약 챕터 집중 공략":
+        st.session_state['target_weak_major'] = None
+        st.session_state['target_weak_sub'] = None
     if 'current_exam_df' in st.session_state:
         del st.session_state['current_exam_df']
 
+target_df = pd.DataFrame()
+
 if scope_type == "특정 챕터 선택":
+    st.session_state['target_weak_major'] = None
     st.session_state['target_weak_sub'] = None
     with c_major:
         major_list = df['대단원'].unique().tolist()
@@ -83,18 +94,20 @@ if scope_type == "특정 챕터 선택":
         st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
 
 elif scope_type == "🚨 자주 틀린 취약 챕터 집중 공략":
+    weak_major = st.session_state['target_weak_major']
     weak_sub = st.session_state['target_weak_sub']
     target_df = df[df['중단원'] == weak_sub]
     active_df = target_df.reset_index(drop=True)
     
     with c_major:
-        st.markdown(f"<br>🚨 집중 공략 중단원", unsafe_allow_html=True)
+        st.markdown(f"<br>🚨 대단원: <b>{weak_major}</b>", unsafe_allow_html=True)
     with c_sub:
-        st.markdown(f"<br><b>{weak_sub}</b>", unsafe_allow_html=True)
+        st.markdown(f"<br>🚨 중단원: <b>{weak_sub}</b>", unsafe_allow_html=True)
     with c_num:
         st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
 
 else:
+    st.session_state['target_weak_major'] = None
     st.session_state['target_weak_sub'] = None
     with c_major:
         st.markdown("<br><b>전체 데이터베이스 대상</b>", unsafe_allow_html=True)
@@ -213,7 +226,7 @@ with main_tab2:
     
     user_answers_dict = {}
     for idx, row in active_df.iterrows():
-        st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
+        st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원어나']} {row['문제 내용']}**")
         ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
         user_answers_dict[idx] = {
             "question": row['문제 내용'],
@@ -290,12 +303,13 @@ with main_tab3:
         
         st.divider()
         
-        # --- 취약 챕터 자동 분석 ---
-        st.subheader("🚨 AI가 분석한 자주 틀리는 취약 챕터 (오답노트 기반)")
+        # --- 대단원별 취약 챕터 분석 ---
+        st.subheader("🚨 대단원별 자주 틀리는 취약 챕터 분석")
         
         res_df['대단원'], res_df['중단원'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
         
-        chapter_stats = res_df.groupby('중단원').agg(
+        # 대단원 > 중단원 기준으로 그룹화
+        chapter_stats = res_df.groupby(['대단원', '중단원']).agg(
             평균점수=('점수', 'mean'),
             풀이횟수=('점수', 'count')
         ).reset_index()
@@ -303,20 +317,22 @@ with main_tab3:
         weak_chapters = chapter_stats.sort_values(by='평균점수', ascending=True)
         
         if not weak_chapters.empty:
-            st.markdown("👇 가장 점수가 낮거나 자주 틀린 **취약 챕터**입니다. 버튼을 누르면 해당 챕터만 모아서 즉시 집중 학습할 수 있습니다!")
+            st.markdown("👇 대단원별로 분류된 **취약 챕터**입니다. 버튼을 누르면 해당 챕터만 모아서 즉시 집중 학습할 수 있습니다!")
             
-            for idx, row in weak_chapters.head(3).iterrows():
+            for idx, row in weak_chapters.head(5).iterrows():
+                major_name = row['대단원']
                 sub_name = row['중단원']
                 avg_s = row['평균점수']
                 count = row['풀이횟수']
                 
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
-                    st.markdown(f"- **{sub_name}** (풀이 횟수: {count}회, 평균 점수: **{avg_s:.1f}점**)")
+                    st.markdown(f"- 📂 **[{major_name}]** ➔ 📌 **{sub_name}** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    if st.button(f"🎯 이 챕터 집중 공략", key=f"weak_btn_{idx}"):
+                    if st.button(f"🎯 집중 공략", key=f"weak_btn_{idx}"):
+                        st.session_state['target_weak_major'] = major_name
                         st.session_state['target_weak_sub'] = sub_name
-                        st.success(f"'{sub_name}' 챕터 집중 공략 모드가 켜졌습니다! 상단 1단계를 확인하세요.")
+                        st.session_state['scope_mode'] = "🚨 자주 틀린 취약 챕터 집중 공략"
                         st.rerun()
         
         st.divider()
