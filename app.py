@@ -15,9 +15,15 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. CSV 데이터 불러오기
+# 3. CSV 데이터 불러오기 (인코딩 자동 감지 적용)
 try:
     df = pd.read_csv('data.csv', encoding='cp949')
+except UnicodeDecodeError:
+    try:
+        df = pd.read_csv('data.csv', encoding='utf-8-sig')
+    except Exception as e:
+        st.error(f"⚠️ 'data.csv' 파일을 읽는 중 오류가 발생했습니다. 파일을 확인해주세요! (오류 내용: {e})")
+        st.stop()
 except FileNotFoundError:
     st.error("⚠️ 'data.csv' 파일이 없습니다. ai_project 폴더 안에 data.csv 파일을 먼저 만들어주세요!")
     st.stop()
@@ -134,11 +140,10 @@ if st.session_state['active_tab_index'] == 0:
     if target_df.empty:
         st.warning("⚠️ 선택된 범위에 문제가 없거나 공략할 파트가 지정되지 않았습니다. 사이드바 설정을 확인하시거나 3단계(오답노트)에서 [🎯 집중 공략] 버튼을 눌러주세요.")
     else:
-        # 셀렉트박스 목록에 "(년도) 문제내용" 형태로 조합해서 보여주기
+        # 셀렉트박스에 (년도) 표기 추가
         question_display_list = [f"({row['년도']}) {row['문제 내용']}" for idx, row in target_df.iterrows()]
         selected_display = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", question_display_list, key="single_q_select")
         
-        # 선택된 항목에서 실제 문제 내용 추출
         selected_q = selected_display.split(") ", 1)[1]
         row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
         
@@ -249,7 +254,7 @@ elif st.session_state['active_tab_index'] == 1:
 
         user_answers_dict = {}
         for idx, row in exam_df.iterrows():
-            # 문제 이름 앞에 `(년도)` 표기 추가
+            # 시험지 모드에서 문제명 앞에 (년도) 표기 추가
             st.markdown(f"**Q{idx+1}. ({row['년도']}) [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
             user_answers_dict[idx] = {
