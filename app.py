@@ -22,7 +22,7 @@ except FileNotFoundError:
     st.error("⚠️ 'data.csv' 파일이 없습니다. ai_project 폴더 안에 data.csv 파일을 먼저 만들어주세요!")
     st.stop()
 
-# --- 점수 추출 및 챕터 매핑 헬퍼 함수 ---
+# --- 헬퍼 함수 ---
 def find_chapter_info(q_text, full_df):
     matched = full_df[full_df['문제 내용'] == q_text]
     if not matched.empty:
@@ -46,7 +46,14 @@ if 'target_weak_major' not in st.session_state:
 if 'scope_mode' not in st.session_state:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
-# ==================== [상단 제어 바: 학습 범위 설정] ====================
+# ==================== [상단 제어 바: 학습 범위 설정 콜백] ====================
+def on_scope_change():
+    st.session_state['scope_mode'] = st.session_state['scope_selector_key']
+    if st.session_state['scope_mode'] != "🚨 자주 틀린 취약 대단원 집중 공략":
+        st.session_state['target_weak_major'] = None
+    if 'batch_exam_df' in st.session_state:
+        del st.session_state['batch_exam_df']
+
 st.markdown("### 🎛️ 1단계: 학습 범위 설정")
 
 scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
@@ -57,26 +64,17 @@ if st.session_state['scope_mode'] not in scope_options:
 c_scope, c_detail = st.columns([1.5, 2.5])
 
 with c_scope:
-    # selectbox의 변경사항을 session_state에 즉시 반영
-    selected_scope = st.selectbox(
+    st.selectbox(
         "출제 범위 선택", 
         scope_options, 
         index=scope_options.index(st.session_state['scope_mode']), 
-        key="scope_selector"
+        key="scope_selector_key",
+        on_change=on_scope_change
     )
-
-if selected_scope != st.session_state['scope_mode']:
-    st.session_state['scope_mode'] = selected_scope
-    if selected_scope != "🚨 자주 틀린 취약 대단원 집중 공략":
-        st.session_state['target_weak_major'] = None
-    if 'batch_exam_df' in st.session_state:
-        del st.session_state['batch_exam_df']
-    st.rerun()
 
 target_df = pd.DataFrame()
 
 if st.session_state['scope_mode'] == "전체 챕터 랜덤":
-    st.session_state['target_weak_major'] = None
     with c_detail:
         st.markdown("<br><b>전체 데이터베이스 대상 (모든 챕터 포함)</b>", unsafe_allow_html=True)
     target_df = df
@@ -84,18 +82,23 @@ if st.session_state['scope_mode'] == "전체 챕터 랜덤":
 elif st.session_state['scope_mode'] == "대단원별 선택":
     with c_detail:
         major_list = df['대단원'].unique().tolist()
+        def on_major_change():
+            st.session_state['selected_major_val'] = st.session_state['major_selector_key']
+            if 'batch_exam_df' in st.session_state:
+                del st.session_state['batch_exam_df']
+
         prev_major = st.session_state.get('selected_major_val', major_list[0])
         if prev_major not in major_list:
             prev_major = major_list[0]
-        selected_major = st.selectbox("대단원 선택", major_list, index=major_list.index(prev_major), key="major_selectbox")
-    
-    if selected_major != st.session_state.get('selected_major_val'):
-        st.session_state['selected_major_val'] = selected_major
-        if 'batch_exam_df' in st.session_state:
-            del st.session_state['batch_exam_df']
-        st.rerun()
-
-    target_df = df[df['대단원'] == selected_major]
+            
+        selected_major = st.selectbox(
+            "대단원 선택", 
+            major_list, 
+            index=major_list.index(prev_major), 
+            key="major_selector_key",
+            on_change=on_major_change
+        )
+    target_df = df[df['대단원'] = st.session_state.get('selected_major_val', major_list[0])]
 
 else:  # 자주 틀린 취약 대단원 집중 공략
     weak_major = st.session_state['target_weak_major']
@@ -202,7 +205,7 @@ with main_tab1:
                     st.markdown(answer_text)
                     st.session_state['messages'].append({"role": "assistant", "content": answer_text})
 
-# ==================== [탭 2: 시험지 모드 (일괄 풀이 & 문항 수 추출)] ====================
+# ==================== [탭 2: 시험지 모드] ====================
 with main_tab2:
     st.markdown("#### 📑 여러 문제를 시험지처럼 지정한 문항 수만큼 뽑아서 한 번에 풀고 채점하는 모드입니다.")
     
@@ -223,7 +226,6 @@ with main_tab2:
             st.session_state['batch_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
 
         exam_df = st.session_state['batch_exam_df']
-        
         st.divider()
 
         user_answers_dict = {}
@@ -329,8 +331,8 @@ with main_tab3:
                 with col_info:
                     st.markdown(f"- 📂 **대단원: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    # 고유 키와 콜백 형식 대신 명확한 세션 상태 갱신형태로 변경
-                    if st.button(f"🎯 집중 공략", key=f"weak_btn_{idx}"):
+                    # 버튼 클릭 시 세션 값을 확실히 갱신하고 재실행
+                    if st.button(f"🎯 집중 공략", key=f"weak_btn_fixed_{idx}"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 자주 틀린 취약 대단원 집중 공략"
                         if 'batch_exam_df' in st.session_state:
