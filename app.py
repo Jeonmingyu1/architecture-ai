@@ -55,7 +55,7 @@ st.sidebar.markdown("### 🎛️ 공부할 범위 고르기")
 
 scope_options = [
     "🎲 전체 챕터", 
-    "📚 파트별 집중 학습", 
+    "📚 챕터별 학습", 
     "🚨 취약 파트 공부"
 ]
 
@@ -84,7 +84,7 @@ if st.session_state['scope_mode'] == "🎲 전체 챕터":
     st.sidebar.info("📂 **모드 설명:** 모든 파트의 문제가 무작위로 섞여서 출제됩니다.")
     target_df = df
 
-elif st.session_state['scope_mode'] == "📚 파트별 집중 학습":
+elif st.session_state['scope_mode'] == "📚 챕터별 학습":
     prev_major = st.session_state['selected_major_val']
     if prev_major not in major_list:
         prev_major = major_list[0]
