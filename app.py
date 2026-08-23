@@ -51,14 +51,13 @@ st.markdown("### 🎛️ 1단계: 학습 범위 설정")
 
 scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
 
-# 현재 세션 상태의 모드가 옵션에 없으면 기본값으로 보정
 if st.session_state['scope_mode'] not in scope_options:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
 c_scope, c_detail = st.columns([1.5, 2.5])
 
 with c_scope:
-    # selectbox의 값과 st.session_state['scope_mode']를 완전히 동기화
+    # selectbox의 변경사항을 session_state에 즉시 반영
     selected_scope = st.selectbox(
         "출제 범위 선택", 
         scope_options, 
@@ -66,7 +65,6 @@ with c_scope:
         key="scope_selector"
     )
 
-# 사용자가 직접 selectbox를 바꿨을 때 처리
 if selected_scope != st.session_state['scope_mode']:
     st.session_state['scope_mode'] = selected_scope
     if selected_scope != "🚨 자주 틀린 취약 대단원 집중 공략":
@@ -211,7 +209,6 @@ with main_tab2:
     if target_df.empty:
         st.warning("선택된 범위에 문제가 없습니다. (취약 챕터 모드인 경우 3단계 오답노트에서 '집중 공략' 버튼을 먼저 눌러주세요)")
     else:
-        # 시험지 모드 전용 컨트롤러 (추출 문항 수 + 랜덤 뽑기 버튼)
         c_cnt, c_action = st.columns([2, 2])
         with c_cnt:
             max_limit = len(target_df)
@@ -222,7 +219,6 @@ with main_tab2:
                 st.session_state['batch_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
                 st.rerun()
 
-        # 시험지용 데이터프레임 관리
         if 'batch_exam_df' not in st.session_state or len(st.session_state['batch_exam_df']) != num_q:
             st.session_state['batch_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
 
@@ -333,7 +329,8 @@ with main_tab3:
                 with col_info:
                     st.markdown(f"- 📂 **대단원: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    if st.button(f"🎯 집중 공략", key=f"weak_major_btn_{idx}"):
+                    # 고유 키와 콜백 형식 대신 명확한 세션 상태 갱신형태로 변경
+                    if st.button(f"🎯 집중 공략", key=f"weak_btn_{idx}"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 자주 틀린 취약 대단원 집중 공략"
                         if 'batch_exam_df' in st.session_state:
