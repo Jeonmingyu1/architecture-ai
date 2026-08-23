@@ -41,53 +41,53 @@ def extract_score(result_text):
     return 0
 
 # ==================== [세션 상태 초기화] ====================
-if 'target_weak_major' not in st.session_state:
-    st.session_state['target_weak_major'] = None
 if 'scope_mode' not in st.session_state:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
+if 'target_weak_major' not in st.session_state:
+    st.session_state['target_weak_major'] = None
+if 'selected_major_val' not in st.session_state:
+    st.session_state['selected_major_val'] = df['대단원'].unique().tolist()[0]
 
-# ==================== [상단 제어 바: 학습 범위 설정 콜백] ====================
-def on_scope_change():
-    st.session_state['scope_mode'] = st.session_state['scope_selector_key']
-    if st.session_state['scope_mode'] != "🚨 자주 틀린 취약 대단원 집중 공략":
-        st.session_state['target_weak_major'] = None
-    if 'batch_exam_df' in st.session_state:
-        del st.session_state['batch_exam_df']
-
+# ==================== [상단 제어 바] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 설정")
 
 scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
 
+# 현재 모드가 목록에 없으면 기본값으로 보정
 if st.session_state['scope_mode'] not in scope_options:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
 c_scope, c_detail = st.columns([1.5, 2.5])
 
 with c_scope:
-    st.selectbox(
+    # selectbox 대신 radio를 사용하면 Streamlit 내부 상태 꼬임이 훨씬 적습니다.
+    selected_scope = st.radio(
         "출제 범위 선택", 
         scope_options, 
-        index=scope_options.index(st.session_state['scope_mode']), 
-        key="scope_selector_key",
-        on_change=on_scope_change
+        index=scope_options.index(st.session_state['scope_mode']),
+        key="scope_radio_fix"
     )
+
+# 라디오 버튼이 바뀌었을 때 처리
+if selected_scope != st.session_state['scope_mode']:
+    st.session_state['scope_mode'] = selected_scope
+    if selected_scope != "🚨 자주 틀린 취약 대단원 집중 공략":
+        st.session_state['target_weak_major'] = None
+    if 'batch_exam_df' in st.session_state:
+        del st.session_state['batch_exam_df']
+    st.rerun()
 
 target_df = pd.DataFrame()
 major_list = df['대단원'].unique().tolist()
 
 if st.session_state['scope_mode'] == "전체 챕터 랜덤":
     with c_detail:
-        st.markdown("<br><b>전체 데이터베이스 대상 (모든 챕터 포함)</b>", unsafe_allow_html=True)
+        st.info("📂 **현재 범위:** 전체 데이터베이스 대상 (모든 챕터 포함)")
     target_df = df
 
 elif st.session_state['scope_mode'] == "대단원별 선택":
     with c_detail:
-        def on_major_change():
-            st.session_state['selected_major_val'] = st.session_state['major_selector_key']
-            if 'batch_exam_df' in st.session_state:
-                del st.session_state['batch_exam_df']
-
-        prev_major = st.session_state.get('selected_major_val', major_list[0])
+        prev_major = st.session_state['selected_major_val']
         if prev_major not in major_list:
             prev_major = major_list[0]
             
@@ -95,21 +95,25 @@ elif st.session_state['scope_mode'] == "대단원별 선택":
             "대단원 선택", 
             major_list, 
             index=major_list.index(prev_major), 
-            key="major_selector_key",
-            on_change=on_major_change
+            key="major_select_fix"
         )
-    # 💡 오타 수정 완료 (= 를 == 로 변경)
-    current_major = st.session_state.get('selected_major_val', major_list[0])
-    target_df = df[df['대단원'] == current_major]
+    
+    if selected_major != st.session_state['selected_major_val']:
+        st.session_state['selected_major_val'] = selected_major
+        if 'batch_exam_df' in st.session_state:
+            del st.session_state['batch_exam_df']
+        st.rerun()
+
+    target_df = df[df['대단원'] == st.session_state['selected_major_val']]
 
 else:  # 자주 틀린 취약 대단원 집중 공략
     weak_major = st.session_state['target_weak_major']
     with c_detail:
         if weak_major:
-            st.markdown(f"<br>🚨 집중 공략 대단원: <b>{weak_major}</b>", unsafe_allow_html=True)
+            st.warning(f"🚨 **[집중 공략 모드 활성화]** 대단원: **{weak_major}**")
             target_df = df[df['대단원'] == weak_major]
         else:
-            st.markdown("<br>⚠️ <b>지정된 취약 대단원 없음 (3단계 오답노트에서 '집중 공략'을 눌러주세요)</b>", unsafe_allow_html=True)
+            st.error("⚠️ 지정된 취약 대단원이 없습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 눌러주세요.")
             target_df = pd.DataFrame()
 
 st.divider()
@@ -123,7 +127,7 @@ with main_tab1:
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
-        st.warning("선택된 범위에 문제가 없거나 집중 공략할 대단원이 지정되지 않았습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 눌러주세요.")
+        st.warning("선택된 범위에 문제가 없습니다. 상단에서 범위를 확인하거나 3단계에서 집중 공략 버튼을 눌러주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list, key="single_q_select")
         row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
@@ -212,7 +216,7 @@ with main_tab2:
     st.markdown("#### 📑 여러 문제를 시험지처럼 지정한 문항 수만큼 뽑아서 한 번에 풀고 채점하는 모드입니다.")
     
     if target_df.empty:
-        st.warning("선택된 범위에 문제가 없습니다. (취약 챕터 모드인 경우 3단계 오답노트에서 '집중 공략' 버튼을 먼저 눌러주세요)")
+        st.warning("선택된 범위에 문제가 없습니다.")
     else:
         c_cnt, c_action = st.columns([2, 2])
         with c_cnt:
@@ -322,7 +326,7 @@ with main_tab3:
         weak_majors = major_stats.sort_values(by='평균점수', ascending=True)
         
         if not weak_majors.empty:
-            st.markdown("👇 대단원별 **취약 과목** 분석입니다. 버튼을 누르면 해당 대단원만 모아서 즉시 집중 학습할 수 있습니다!")
+            st.markdown("👇 대단원별 **취약 과목** 분석입니다. 버튼을 누르면 즉시 집중 공략 모드로 전환됩니다!")
             
             for idx, row in weak_majors.head(5).iterrows():
                 major_name = row['대단원']
@@ -333,7 +337,8 @@ with main_tab3:
                 with col_info:
                     st.markdown(f"- 📂 **대단원: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    if st.button(f"🎯 집중 공략", key=f"weak_btn_fixed_{idx}"):
+                    # 버튼 누를 때 탭을 1단계(문제 풀기)로 강제 이동하거나 즉시 반영
+                    if st.button(f"🎯 집중 공략", key=f"weak_btn_radio_{idx}"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 자주 틀린 취약 대단원 집중 공략"
                         if 'batch_exam_df' in st.session_state:
