@@ -49,7 +49,6 @@ if 'scope_mode' not in st.session_state:
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
 
-# 💡 옵션 목록을 항상 고정하여 셀렉트박스가 흔들리지 않도록 수정
 scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
 
 current_mode = st.session_state['scope_mode']
@@ -59,7 +58,8 @@ if current_mode not in scope_options:
 
 default_idx = scope_options.index(current_mode)
 
-c_scope, c_major, c_num = st.columns([2, 2, 1])
+# 레이아웃 비율 조정 (랜덤 버튼 공간 확보)
+c_scope, c_major, c_num, c_btn = st.columns([1.5, 1.5, 1, 1.2])
 
 with c_scope:
     scope_type = st.selectbox("출제 범위 선택", scope_options, index=default_idx, key="scope_selector")
@@ -101,7 +101,7 @@ elif scope_type == "🚨 자주 틀린 취약 대단원 집중 공략":
     with c_num:
         st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
 
-else:
+else:  # 전체 챕터 랜덤 모드
     st.session_state['target_weak_major'] = None
     with c_major:
         st.markdown("<br><b>전체 데이터베이스 대상</b>", unsafe_allow_html=True)
@@ -111,9 +111,16 @@ else:
 
     target_df = df
     
-    if 'current_exam_df' not in st.session_state or st.button("🎲 새로운 랜덤 문제 뽑기", use_container_width=True):
+    # 🎲 전체 챕터 랜덤 모드일 때만 활성화되는 랜덤 문제 뽑기 버튼
+    with c_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🎲 새로운 랜덤 문제 뽑기", use_container_width=True):
+            st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
+            st.session_state['messages'] = []
+            st.rerun()
+
+    if 'current_exam_df' not in st.session_state:
         st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
-        st.session_state['messages'] = []
     
     active_df = st.session_state['current_exam_df']
 
