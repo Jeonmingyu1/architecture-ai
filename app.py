@@ -23,6 +23,13 @@ except FileNotFoundError:
     st.stop()
 
 # --- 점수 추출 헬퍼 함수 ---
+# CSV에 챕터 정보가 없을 경우를 대비해 원본 df와 문제를 매칭하기 위한 함수 추가
+def find_chapter_info(q_text, full_df):
+    matched = full_df[full_df['문제 내용'] == q_text]
+    if not matched.empty:
+        return matched.iloc[0]['대단원'], matched.iloc[0]['중단원']
+    return "기타", "기타"
+
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
     if match:
@@ -36,10 +43,21 @@ def extract_score(result_text):
 
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
+
+# 세션에 취약 챕터 집중 공략 요청이 들어온 경우 처리
+if 'target_weak_sub' not in st.session_state:
+    st.session_state['target_weak_sub'] = None
+
+scope_options = ["전체 챕터 랜덤", "특정 챕터 선택"]
+default_scope_idx = 0
+if st.session_state['target_weak_sub']:
+    scope_options.append("🚨 자주 틀린 취약 챕터 집중 공략")
+    default_scope_idx = 2
+
 c_scope, c_major, c_sub, c_num = st.columns([1.5, 1.5, 1.5, 1])
 
 with c_scope:
-    scope_type = st.selectbox("출제 범위 선택", ["전체 챕터 랜덤", "특정 챕터 선택"], key="scope_selector")
+    scope_type = st.selectbox("출제 범위 선택", scope_options, index=default_scope_idx, key="scope_selector")
 
 target_df = pd.DataFrame()
 
@@ -53,6 +71,7 @@ if st.session_state['last_scope'] != scope_type:
         del st.session_state['current_exam_df']
 
 if scope_type == "특정 챕터 선택":
+    st.session_state['target_weak_sub'] = None # 초기화
     with c_major:
         major_list = df['대단원'].unique().tolist()
         selected_major = st.selectbox("대단원", major_list)
@@ -60,14 +79,26 @@ if scope_type == "특정 챕터 선택":
         sub_list = df[df['대단원'] == selected_major]['중단원'].unique().tolist()
         selected_sub = st.selectbox("중단원", sub_list)
     
-    # 특정 챕터는 고정된 전체 데이터를 대상으로 함 (새로고침 불필요)
     target_df = df[df['중단원'] == selected_sub]
     active_df = target_df.reset_index(drop=True)
     
     with c_num:
         st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
 
+elif scope_type == "🚨 자주 틀린 취약 챕터 집중 공략":
+    weak_sub = st.session_state['target_weak_sub']
+    target_df = df[df['중단원'] == weak_sub]
+    active_df = target_df.reset_index(drop=True)
+    
+    with c_major:
+        st.markdown(f"<br>🚨 집중 공략 중단원", unsafe_allow_html=True)
+    with c_sub:
+        st.markdown(f"<br><b>{weak_sub}</b>", unsafe_allow_html=True)
+    with c_num:
+        st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
+
 else:
+    st.session_state['target_weak_sub'] = None
     with c_major:
         st.markdown("<br><b>전체 데이터베이스 대상</b>", unsafe_allow_html=True)
     with c_sub:
@@ -78,7 +109,6 @@ else:
 
     target_df = df
     
-    # 전체 챕터 랜덤일 때만 '새로운 문제 뽑기' 버튼 제공
     if 'current_exam_df' not in st.session_state or st.button("🎲 새로운 랜덤 문제 뽑기", use_container_width=True):
         st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
         st.session_state['messages'] = []
@@ -246,7 +276,7 @@ with main_tab2:
 
 # ==================== [탭 3: 학습 분석 & 오답노트] ====================
 with main_tab3:
-    st.header("📈 나의 학습 성적표 및 오답노트")
+    st.header("📈 나의 학습 성적표 및 취약 챕터 분석")
     results_file = 'results.csv'
     
     if not os.path.isfile(results_file):
@@ -262,8 +292,42 @@ with main_tab3:
         c3.metric("학습 상태", "🎯 합격권" if avg >= 60 else "⚠️ 보완 필요")
         
         st.divider()
+        
+        # --- 취약 챕터 자동 분석 ---
+        st.subheader("🚨 AI가 분석한 자주 틀리는 취약 챕터 (오답노트 기반)")
+        
+        # 기록된 문제들에 대단원/중단원 매핑
+        res_df['대단원'], res_df['중단원'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
+        
+        # 챕터별 평균 점수 계산
+        chapter_stats = res_df.groupby('중단원').agg(
+            평균점수=('점수', 'mean'),
+            풀이횟수=('점수', 'count')
+        ).reset_index()
+        
+        # 점수가 낮은 순서대로 정렬 (취약 챕터 추출)
+        weak_chapters = chapter_stats.sort_values(by='평균점수', ascending=True)
+        
+        if not weak_chapters.empty:
+            st.markdown("👇 가장 점수가 낮거나 자주 틀린 **취약 챕터**입니다. 버튼을 누르면 해당 챕터만 모아서 즉시 집중 학습할 수 있습니다!")
+            
+            for idx, row in weak_chapters.head(3).iterrows():
+                sub_name = row['중단원']
+                avg_s = row['평균점수']
+                count = row['풀이횟수']
+                
+                col_info, col_btn = st.columns([3, 1])
+                with col_info:
+                    st.markdown(f"- **{sub_name}** (풀이 횟수: {count회}, 평균 점수: **{avg_s:.1f}점**)")
+                with col_btn:
+                    if st.button(f"🎯 이 챕터 집중 공략", key=f"weak_btn_{idx}"):
+                        st.session_state['target_weak_sub'] = sub_name
+                        st.success(f"'{sub_name}' 챕터 집중 공략 모드가 켜졌습니다! 상단 1단계를 확인하세요.")
+                        st.rerun()
+        
+        st.divider()
         st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df, use_container_width=True)
+        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
         
         if st.button("🗑️ 학습 기록 전체 초기화"):
             if os.path.isfile(results_file):
