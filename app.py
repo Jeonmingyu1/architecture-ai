@@ -4,7 +4,7 @@ from openai import OpenAI
 import csv
 import os
 import re
-import random  
+import random
 
 # 1. 페이지 설정
 st.set_page_config(page_title="건축기사 AI 채점 로봇", layout="wide")
@@ -57,11 +57,7 @@ tab1, tab2 = st.tabs(["📝 기출문제 풀기 & AI 채점", "📊 나의 학�
 
 # ==================== [탭 1: 문제 풀이 화면] ====================
 with tab1:
-    st.sidebar.header("📚 학습 설정")
-    
-    # 💡 [추가 기능] 학습 모드 선택 (순서대로 vs 랜덤)
-    learning_mode = st.sidebar.radio("학습 모드를 선택하세요:", ["📁 챕터별 순서대로 학습", "🎲 랜덤 모의고사 (문제 뽑기)"])
-
+    st.sidebar.header("📚 학습 챕터 선택")
     major_categories = df['대단원'].unique().tolist()
     selected_major = st.sidebar.selectbox("대단원을 선택하세요:", major_categories)
 
@@ -73,26 +69,25 @@ with tab1:
     all_questions = filtered_df['문제 내용'].tolist()
 
     st.sidebar.divider()
-    st.sidebar.info(f"선택한 챕터의 전체 문제 수: **{len(all_questions)}개**")
+    st.sidebar.info(f"현재 챕터의 전체 문제 수: **{len(all_questions)}개**")
 
     if not all_questions:
         st.warning("해당 챕터에 등록된 문제가 없습니다.")
     else:
-        # 모드에 따른 문제 리스트 구성
-        if learning_mode == "📁 챕터별 순서대로 학습":
-            question_list = all_questions
-            selected_q = st.selectbox("📌 문제를 선택하세요:", question_list)
+        # 🎲 메인 화면 상단에 학습 방식 선택 (목록에서 고르기 vs 랜덤 뽑기)
+        mode = st.radio("🔍 문제 풀이 방식을 선택하세요:", ["목록에서 직접 선택하기", "🎲 랜덤으로 문제 뽑기"], horizontal=True)
+        
+        st.divider()
+
+        if mode == "목록에서 직접 선택하기":
+            selected_q = st.selectbox("📌 문제를 선택하세요:", all_questions)
         else:
-            # 🎲 랜덤 모의고사 모드
-            max_val = min(5, len(all_questions)) # 최대 5문제 또는 전체 개수 중 선택
-            num_questions = st.sidebar.slider("풀고 싶은 랜덤 문제 수:", min_value=1, max_value=max_val, value=min(3, max_val))
+            # 세션 스테이트를 이용해 랜덤 문제 고정 및 새로 뽑기 기능 구현
+            if 'current_random_q' not in st.session_state or st.button("🎲 다른 랜덤 문제 뽑기"):
+                st.session_state['current_random_q'] = random.choice(all_questions)
             
-            # 세션 스테이트를 이용해 새로고침해도 랜덤 문제가 고정되도록 처리
-            if 'random_questions' not in st.session_state or st.sidebar.button("🎲 새로운 랜덤 문제 뽑기"):
-                st.session_state['random_questions'] = random.sample(all_questions, num_questions)
-            
-            question_list = st.session_state['random_questions']
-            selected_q = st.selectbox("📌 랜덤 출제된 문제를 선택하세요:", question_list)
+            selected_q = st.session_state['current_random_q']
+            st.info(f"🎲 랜덤 출제된 문제입니다: **{selected_q}**")
 
         # 선택된 문제의 데이터 가져오기
         row_data = filtered_df[filtered_df['문제 내용'] == selected_q].iloc[0]
@@ -182,7 +177,7 @@ with tab2:
             st.subheader("📊 학습 점수 추이 그래프")
             st.line_chart(res_df['점수'])
         else:
-            st.metric(label="총 풀이 및 채점 횟수", value=f"{total_solved}회")
+            st.metric(label="총 풀이 및 `채점 횟수", value=f"{total_solved}회")
         
         st.divider()
         st.subheader("📋 전체 채점 및 오답노트 기록")
