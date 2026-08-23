@@ -226,7 +226,7 @@ with main_tab2:
     
     user_answers_dict = {}
     for idx, row in active_df.iterrows():
-        st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원어나']} {row['문제 내용']}**")
+        st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
         ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
         user_answers_dict[idx] = {
             "question": row['문제 내용'],
@@ -308,7 +308,6 @@ with main_tab3:
         
         res_df['대단원'], res_df['중단원'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
         
-        # 대단원 > 중단원 기준으로 그룹화
         chapter_stats = res_df.groupby(['대단원', '중단원']).agg(
             평균점수=('점수', 'mean'),
             풀이횟수=('점수', 'count')
