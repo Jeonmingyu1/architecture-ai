@@ -7,7 +7,7 @@ import re
 import random
 
 # 1. 페이지 설정
-st.set_page_config(page_title="건축기사 AI 채점 로봇", layout="wide")
+st.set_page_config(page_title="건축기사 AI 학습 & 채점 시스템", layout="wide")
 st.title("🏗️ 건축기사 AI 학습 & 채점 시스템")
 
 # 2. Gemini API 키 설정
@@ -65,11 +65,12 @@ with tab1:
     sub_categories = sub_df['중단원'].unique().tolist()
     selected_sub = st.sidebar.selectbox("중단원을 선택하세요:", sub_categories)
 
-    # 챕터가 바뀌면 이전 랜덤 문제 기록 초기화
+    # 챕터나 문제가 바뀌면 대화 기록 초기화
     if 'prev_sub' not in st.session_state or st.session_state['prev_sub'] != selected_sub:
         st.session_state['prev_sub'] = selected_sub
         if 'current_random_q' in st.session_state:
             del st.session_state['current_random_q']
+        st.session_state['messages'] = []
 
     filtered_df = sub_df[sub_df['중단원'] == selected_sub]
     all_questions = filtered_df['문제 내용'].tolist()
@@ -90,6 +91,7 @@ with tab1:
         else:
             if 'current_random_q' not in st.session_state or st.button("🎲 다른 랜덤 문제 뽑기"):
                 st.session_state['current_random_q'] = random.choice(all_questions)
+                st.session_state['messages'] = [] # 문제 바뀌면 대화 초기화
             
             selected_q = st.session_state['current_random_q']
             st.info(f"🎲 랜덤 출제된 문제입니다: **{selected_q}**")
@@ -105,7 +107,7 @@ with tab1:
         correct_answer = row_data['모범 답안']
         explanation = row_data['해설']
 
-        user_answer = st.text_area("✍️ 정답을 서술해 주세요:")
+        user_answer = st.text_area("✍️ 정답을 서술해 주세요:", key="user_answer_input")
 
         if st.button("AI 채점 및 분석 요청"):
             if not user_answer:
@@ -139,16 +141,20 @@ with tab1:
                     """
 
                     response = client.chat.completions.create(
-                        model="gemini-3.6-flash", 
+                        model="gemini-1.5-flash", 
                         messages=[{"role": "user", "content": prompt}]
                     )
 
                     result = response.choices[0].message.content
                     score = extract_score(result)
 
-                    st.subheader("📌 AI 채점 및 피드백 결과")
-                    st.write(result)
+                    # 세션 대화 기록에 채점 결과 반영
+                    st.session_state['messages'] = [
+                        {"role": "user", "content": f"문제: {selected_q}\n내 답안: {user_answer}"},
+                        {"role": "assistant", "content": result}
+                    ]
 
+                    # 결과 저장
                     file_name = 'results.csv'
                     file_exists = os.path.isfile(file_name)
 
@@ -161,6 +167,43 @@ with tab1:
                         writer.writerow([selected_q, user_answer, score, clean_result])
 
                     st.success("📁 채점 결과가 학습 분석 데이터에 안전하게 저장되었습니다!")
+
+        # --- 이어서 질문하기 (채팅 인터페이스) ---
+        st.divider()
+        st.subheader("💬 AI에게 이어서 질문하기")
+        st.caption("채점 결과에 대해 궁금한 점이나 더 알고 싶은 개념을 자유롭게 물어보세요!")
+
+        if 'messages' not in st.session_state:
+            st.session_state['messages'] = []
+
+        # 이전 대화 출력
+        for message in st.session_state['messages']:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # 추가 질문 입력
+        if chat_input := st.chat_input("예: 이 개념이 실기 시험에 또 어떻게 응용돼서 나와?"):
+            st.session_state['messages'].append({"role": "user", "content": chat_input})
+            with st.chat_message("user"):
+                st.markdown(chat_input)
+
+            with st.chat_message("assistant"):
+                with st.spinner("답변 생성 중..."):
+                    # 시스템 프롬프트 및 맥락 유지
+                    chat_history = [
+                        {
+                            "role": "system", 
+                            "content": f"너는 건축기사 수석 강사야. 현재 풀고 있는 문제는 '{selected_q}'이고 모범 답안은 '{correct_answer}', 해설은 '{explanation}'이야. 학생의 추가 질문에 친절하고 전문적으로 답해줘."
+                        }
+                    ] + st.session_state['messages']
+
+                    chat_response = client.chat.completions.create(
+                        model="gemini-1.5-flash",
+                        messages=chat_history
+                    )
+                    answer_text = chat_response.choices[0].message.content
+                    st.markdown(answer_text)
+                    st.session_state['messages'].append({"role": "assistant", "content": answer_text})
 
 # ==================== [탭 2: 학습 분석 및 오답노트 화면] ====================
 with tab2:
