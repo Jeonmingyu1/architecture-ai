@@ -73,6 +73,7 @@ with c_scope:
     )
 
 target_df = pd.DataFrame()
+major_list = df['대단원'].unique().tolist()
 
 if st.session_state['scope_mode'] == "전체 챕터 랜덤":
     with c_detail:
@@ -81,7 +82,6 @@ if st.session_state['scope_mode'] == "전체 챕터 랜덤":
 
 elif st.session_state['scope_mode'] == "대단원별 선택":
     with c_detail:
-        major_list = df['대단원'].unique().tolist()
         def on_major_change():
             st.session_state['selected_major_val'] = st.session_state['major_selector_key']
             if 'batch_exam_df' in st.session_state:
@@ -98,7 +98,9 @@ elif st.session_state['scope_mode'] == "대단원별 선택":
             key="major_selector_key",
             on_change=on_major_change
         )
-    target_df = df[df['대단원'] = st.session_state.get('selected_major_val', major_list[0])]
+    # 💡 오타 수정 완료 (= 를 == 로 변경)
+    current_major = st.session_state.get('selected_major_val', major_list[0])
+    target_df = df[df['대단원'] == current_major]
 
 else:  # 자주 틀린 취약 대단원 집중 공략
     weak_major = st.session_state['target_weak_major']
@@ -331,7 +333,6 @@ with main_tab3:
                 with col_info:
                     st.markdown(f"- 📂 **대단원: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    # 버튼 클릭 시 세션 값을 확실히 갱신하고 재실행
                     if st.button(f"🎯 집중 공략", key=f"weak_btn_fixed_{idx}"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 자주 틀린 취약 대단원 집중 공략"
