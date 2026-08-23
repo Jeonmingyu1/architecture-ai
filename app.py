@@ -48,27 +48,23 @@ if 'target_weak_major' not in st.session_state:
 if 'selected_major_val' not in st.session_state:
     st.session_state['selected_major_val'] = df['대단원'].unique().tolist()[0]
 
-# ==================== [상단 제어 바] ====================
-st.markdown("### 🎛️ 1단계: 학습 범위 설정")
+# ==================== [사이드바: 학습 범위 설정] ====================
+st.sidebar.markdown("### 🎛️ 학습 범위 설정")
 
 scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
 
-# 현재 모드가 목록에 없으면 기본값으로 보정
 if st.session_state['scope_mode'] not in scope_options:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
-c_scope, c_detail = st.columns([1.5, 2.5])
+# 사이드바에서 모드 선택
+selected_scope = st.sidebar.radio(
+    "출제 범위 선택", 
+    scope_options, 
+    index=scope_options.index(st.session_state['scope_mode']),
+    key="sidebar_scope_radio"
+)
 
-with c_scope:
-    # selectbox 대신 radio를 사용하면 Streamlit 내부 상태 꼬임이 훨씬 적습니다.
-    selected_scope = st.radio(
-        "출제 범위 선택", 
-        scope_options, 
-        index=scope_options.index(st.session_state['scope_mode']),
-        key="scope_radio_fix"
-    )
-
-# 라디오 버튼이 바뀌었을 때 처리
+# 사용자가 사이드바에서 직접 모드를 바꾼 경우
 if selected_scope != st.session_state['scope_mode']:
     st.session_state['scope_mode'] = selected_scope
     if selected_scope != "🚨 자주 틀린 취약 대단원 집중 공략":
@@ -81,22 +77,20 @@ target_df = pd.DataFrame()
 major_list = df['대단원'].unique().tolist()
 
 if st.session_state['scope_mode'] == "전체 챕터 랜덤":
-    with c_detail:
-        st.info("📂 **현재 범위:** 전체 데이터베이스 대상 (모든 챕터 포함)")
+    st.sidebar.info("📂 **현재 범위:** 전체 데이터베이스 대상")
     target_df = df
 
 elif st.session_state['scope_mode'] == "대단원별 선택":
-    with c_detail:
-        prev_major = st.session_state['selected_major_val']
-        if prev_major not in major_list:
-            prev_major = major_list[0]
-            
-        selected_major = st.selectbox(
-            "대단원 선택", 
-            major_list, 
-            index=major_list.index(prev_major), 
-            key="major_select_fix"
-        )
+    prev_major = st.session_state['selected_major_val']
+    if prev_major not in major_list:
+        prev_major = major_list[0]
+        
+    selected_major = st.sidebar.selectbox(
+        "대단원 선택", 
+        major_list, 
+        index=major_list.index(prev_major), 
+        key="sidebar_major_select"
+    )
     
     if selected_major != st.session_state['selected_major_val']:
         st.session_state['selected_major_val'] = selected_major
@@ -108,18 +102,17 @@ elif st.session_state['scope_mode'] == "대단원별 선택":
 
 else:  # 자주 틀린 취약 대단원 집중 공략
     weak_major = st.session_state['target_weak_major']
-    with c_detail:
-        if weak_major:
-            st.warning(f"🚨 **[집중 공략 모드 활성화]** 대단원: **{weak_major}**")
-            target_df = df[df['대단원'] == weak_major]
-        else:
-            st.error("⚠️ 지정된 취약 대단원이 없습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 눌러주세요.")
-            target_df = pd.DataFrame()
+    if weak_major:
+        st.sidebar.warning(f"🚨 **집중 공략 대단원:**\n\n**{weak_major}**")
+        target_df = df[df['대단원'] == weak_major]
+    else:
+        st.sidebar.error("⚠️ 지정된 취약 대단원이 없습니다.\n\n'3단계' 오답노트에서 [🎯 집중 공략] 버튼을 눌러주세요.")
+        target_df = pd.DataFrame()
 
-st.divider()
+st.sidebar.divider()
 
 # ==================== [메인 대메뉴 탭] ====================
-main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 2단계: 문제 풀기 & AI 채팅", "📑 3단계: 시험지 모드 (일괄 풀이)", "📊 나의 학습 기록 & 오답노트"])
+main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 1단계: 문제 풀기 & AI 채팅", "📑 2단계: 시험지 모드 (일괄 풀이)", "📊 3단계: 나의 학습 기록 & 오답노트"])
 
 # ==================== [탭 1: 한 문제씩 풀기 + 이어서 질문하기] ====================
 with main_tab1:
@@ -127,7 +120,7 @@ with main_tab1:
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
-        st.warning("선택된 범위에 문제가 없습니다. 상단에서 범위를 확인하거나 3단계에서 집중 공략 버튼을 눌러주세요.")
+        st.warning("⚠️ 선택된 범위에 문제가 없거나 집중 공략할 대단원이 지정되지 않았습니다. 사이드바 설정을 확인하시거나 3단계(오답노트)에서 [🎯 집중 공략] 버튼을 눌러주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list, key="single_q_select")
         row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
@@ -216,7 +209,7 @@ with main_tab2:
     st.markdown("#### 📑 여러 문제를 시험지처럼 지정한 문항 수만큼 뽑아서 한 번에 풀고 채점하는 모드입니다.")
     
     if target_df.empty:
-        st.warning("선택된 범위에 문제가 없습니다.")
+        st.warning("⚠️ 선택된 범위에 문제가 없습니다. 사이드바 설정을 확인해주세요.")
     else:
         c_cnt, c_action = st.columns([2, 2])
         with c_cnt:
@@ -326,7 +319,7 @@ with main_tab3:
         weak_majors = major_stats.sort_values(by='평균점수', ascending=True)
         
         if not weak_majors.empty:
-            st.markdown("👇 대단원별 **취약 과목** 분석입니다. 버튼을 누르면 즉시 집중 공략 모드로 전환됩니다!")
+            st.markdown("👇 대단원별 **취약 과목** 분석입니다. **[🎯 집중 공략]** 버튼을 누르면 즉시 해당 대단원 모드로 전환됩니다!")
             
             for idx, row in weak_majors.head(5).iterrows():
                 major_name = row['대단원']
@@ -337,8 +330,8 @@ with main_tab3:
                 with col_info:
                     st.markdown(f"- 📂 **대단원: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    # 버튼 누를 때 탭을 1단계(문제 풀기)로 강제 이동하거나 즉시 반영
-                    if st.button(f"🎯 집중 공략", key=f"weak_btn_radio_{idx}"):
+                    # 💡 여기서 확실하게 세션을 고정하고 rerun 실행
+                    if st.button(f"🎯 집중 공략", key=f"weak_btn_sidebar_fix_{idx}", type="primary"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 자주 틀린 취약 대단원 집중 공략"
                         if 'batch_exam_df' in st.session_state:
