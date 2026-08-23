@@ -35,13 +35,22 @@ def extract_score(result_text):
     return 0
 
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
-st.markdown("### 🎛️ 학습 범위 및 출제 설정")
+st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
 c_scope, c_major, c_sub, c_num = st.columns([1.5, 1.5, 1.5, 1])
 
 with c_scope:
-    scope_type = st.selectbox("출제 범위 선택", ["전체 챕터 랜덤", "특정 챕터 선택"])
+    scope_type = st.selectbox("출제 범위 선택", ["전체 챕터 랜덤", "특정 챕터 선택"], key="scope_selector")
 
 target_df = pd.DataFrame()
+
+# 범위 선택 방식이 바뀔 때 세션 초기화용 키 체크
+if 'last_scope' not in st.session_state:
+    st.session_state['last_scope'] = scope_type
+
+if st.session_state['last_scope'] != scope_type:
+    st.session_state['last_scope'] = scope_type
+    if 'current_exam_df' in st.session_state:
+        del st.session_state['current_exam_df']
 
 if scope_type == "특정 챕터 선택":
     with c_major:
@@ -50,28 +59,36 @@ if scope_type == "특정 챕터 선택":
     with c_sub:
         sub_list = df[df['대단원'] == selected_major]['중단원'].unique().tolist()
         selected_sub = st.selectbox("중단원", sub_list)
+    
+    # 특정 챕터는 고정된 전체 데이터를 대상으로 함 (새로고침 불필요)
     target_df = df[df['중단원'] == selected_sub]
+    active_df = target_df.reset_index(drop=True)
+    
+    with c_num:
+        st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
+
 else:
     with c_major:
         st.markdown("<br><b>전체 데이터베이스 대상</b>", unsafe_allow_html=True)
     with c_sub:
-        st.markdown(f"<br>총 문제수: <b>{len(df)}개</b>", unsafe_allow_html=True)
-    target_df = df
+        st.markdown(f"<br>총 데이터: <b>{len(df)}개</b>", unsafe_allow_html=True)
+    
+    with c_num:
+        num_q = st.number_input("추출 문항 수", min_value=1, max_value=max(1, len(df)), value=min(5, len(df)))
 
-with c_num:
-    num_q = st.number_input("추출 문항 수", min_value=1, max_value=max(1, len(target_df)), value=min(5, len(target_df)))
+    target_df = df
+    
+    # 전체 챕터 랜덤일 때만 '새로운 문제 뽑기' 버튼 제공
+    if 'current_exam_df' not in st.session_state or st.button("🎲 새로운 랜덤 문제 뽑기", use_container_width=True):
+        st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
+        st.session_state['messages'] = []
+    
+    active_df = st.session_state['current_exam_df']
 
 st.divider()
 
-# 문제 세트 갱신 세션 관리
-if 'current_exam_df' not in st.session_state or st.button("🔄 새로운 문제 세트 불러오기 (새로고침)", use_container_width=True):
-    st.session_state['current_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
-    st.session_state['messages'] = []
-
-active_df = st.session_state['current_exam_df']
-
 # ==================== [메인 대메뉴 탭] ====================
-main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 문제 풀기 & AI 채팅", "📑 시험지 모드 (일괄 풀이)", "📊 나의 학습 기록 & 오답노트"])
+main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 2단계: 문제 풀기 & AI 채팅", "📑 3단계: 시험지 모드 (일괄 풀이)", "📊 나의 학습 기록 & 오답노트"])
 
 # ==================== [탭 1: 한 문제씩 풀기 + 이어서 질문하기] ====================
 with main_tab1:
