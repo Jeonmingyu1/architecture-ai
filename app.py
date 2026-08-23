@@ -42,7 +42,7 @@ def extract_score(result_text):
 
 # ==================== [세션 상태 초기화] ====================
 if 'scope_mode' not in st.session_state:
-    st.session_state['scope_mode'] = "🎲 랜덤 모의고사"
+    st.session_state['scope_mode'] = "🎲 모의고사"
 if 'target_weak_major' not in st.session_state:
     st.session_state['target_weak_major'] = None
 if 'selected_major_val' not in st.session_state:
@@ -54,13 +54,13 @@ if 'active_tab_index' not in st.session_state:
 st.sidebar.markdown("### 🎛️ 공부할 범위 고르기")
 
 scope_options = [
-    "🎲 랜덤 모의고사", 
+    "🎲 모의고사", 
     "📚 파트별 집중 학습", 
     "🚨 취약 파트 공부"
 ]
 
 if st.session_state['scope_mode'] not in scope_options:
-    st.session_state['scope_mode'] = "🎲 랜덤 모의고사"
+    st.session_state['scope_mode'] = "🎲 모의고사"
 
 selected_scope = st.sidebar.radio(
     "학습 모드 선택", 
@@ -80,7 +80,7 @@ if selected_scope != st.session_state['scope_mode']:
 target_df = pd.DataFrame()
 major_list = df['대단원'].unique().tolist()
 
-if st.session_state['scope_mode'] == "🎲 랜덤 모의고사":
+if st.session_state['scope_mode'] == "🎲 모의고사":
     st.sidebar.info("📂 **모드 설명:** 모든 파트의 문제가 무작위로 섞여서 출제됩니다.")
     target_df = df
 
