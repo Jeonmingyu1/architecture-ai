@@ -198,7 +198,7 @@ with tab1:
                     ] + st.session_state['messages']
 
                     chat_response = client.chat.completions.create(
-                        model="gemini-1.5-flash",
+                        model="gemini-3.6-flash",
                         messages=chat_history
                     )
                     answer_text = chat_response.choices[0].message.content
