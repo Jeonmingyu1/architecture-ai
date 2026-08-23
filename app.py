@@ -43,17 +43,14 @@ def extract_score(result_text):
 # ==================== [세션 상태 초기화] ====================
 if 'target_weak_major' not in st.session_state:
     st.session_state['target_weak_major'] = None
-if 'target_weak_sub' not in st.session_state:
-    st.session_state['target_weak_sub'] = None
 if 'scope_mode' not in st.session_state:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
 # ==================== [상단 통합 제어 바: 학습 범위 설정] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 및 출제 설정")
 
-scope_options = ["전체 챕터 랜덤", "대단원별 선택"]
-if st.session_state['target_weak_major']:
-    scope_options.append("🚨 자주 틀린 취약 대단원 집중 공략")
+# 💡 옵션 목록을 항상 고정하여 셀렉트박스가 흔들리지 않도록 수정
+scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
 
 current_mode = st.session_state['scope_mode']
 if current_mode not in scope_options:
@@ -71,7 +68,6 @@ if scope_type != st.session_state['scope_mode']:
     st.session_state['scope_mode'] = scope_type
     if scope_type != "🚨 자주 틀린 취약 대단원 집중 공략":
         st.session_state['target_weak_major'] = None
-        st.session_state['target_weak_sub'] = None
     if 'current_exam_df' in st.session_state:
         del st.session_state['current_exam_df']
 
@@ -79,7 +75,6 @@ target_df = pd.DataFrame()
 
 if scope_type == "대단원별 선택":
     st.session_state['target_weak_major'] = None
-    st.session_state['target_weak_sub'] = None
     with c_major:
         major_list = df['대단원'].unique().tolist()
         selected_major = st.selectbox("대단원 선택", major_list)
@@ -92,17 +87,22 @@ if scope_type == "대단원별 선택":
 
 elif scope_type == "🚨 자주 틀린 취약 대단원 집중 공략":
     weak_major = st.session_state['target_weak_major']
-    target_df = df[df['대단원'] == weak_major]
-    active_df = target_df.reset_index(drop=True)
     
     with c_major:
-        st.markdown(f"<br>🚨 대단원: <b>{weak_major}</b>", unsafe_allow_html=True)
+        if weak_major:
+            st.markdown(f"<br>🚨 대단원: <b>{weak_major}</b>", unsafe_allow_html=True)
+            target_df = df[df['대단원'] == weak_major]
+        else:
+            st.markdown("<br>⚠️ <b>선택된 취약 대단원이 없습니다.</b>", unsafe_allow_html=True)
+            target_df = pd.DataFrame()
+            
+    active_df = target_df.reset_index(drop=True)
+    
     with c_num:
         st.markdown(f"<br>총 문제수: <b>{len(active_df)}개</b>", unsafe_allow_html=True)
 
 else:
     st.session_state['target_weak_major'] = None
-    st.session_state['target_weak_sub'] = None
     with c_major:
         st.markdown("<br><b>전체 데이터베이스 대상</b>", unsafe_allow_html=True)
     
@@ -126,9 +126,9 @@ main_tab1, main_tab2, main_tab3 = st.tabs(["🎯 2단계: 문제 풀기 & AI 채
 with main_tab1:
     st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 상세 피드백과 추가 질문을 주고받는 모드입니다.")
     
-    q_list = active_df['문제 내용'].tolist()
+    q_list = active_df['문제 내용'].tolist() if not active_df.empty else []
     if not q_list:
-        st.warning("선택된 범위에 문제가 없습니다.")
+        st.warning("선택된 범위에 문제가 없거나 집중 공략할 챕터가 지정되지 않았습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 누르거나 범위를 다시 선택해주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list)
         row_data = active_df[active_df['문제 내용'] == selected_q].iloc[0]
@@ -136,7 +136,6 @@ with main_tab1:
         correct_answer = row_data['모범 답안']
         explanation = row_data['해설']
 
-        # 💡 문제 출력 시 대단원과 중단원이 함께 표시되도록 설정
         st.info(f"**[출제단원] 대단원: {row_data['대단원']}  |  중단원: {row_data['중단원']}**\n\n{selected_q}")
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
@@ -217,66 +216,68 @@ with main_tab1:
 with main_tab2:
     st.markdown("#### 📑 여러 문제를 시험지처럼 쭉 풀고 한 번에 채점하는 모드입니다.")
     
-    user_answers_dict = {}
-    for idx, row in active_df.iterrows():
-        # 💡 시험지 모드에서도 대단원과 중단원이 함께 표시되도록 설정
-        st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
-        ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
-        user_answers_dict[idx] = {
-            "question": row['문제 내용'],
-            "correct": row['모범 답안'],
-            "explanation": row['해설'],
-            "user_ans": ans
-        }
-        st.markdown("---")
+    if active_df.empty:
+        st.warning("선택된 범위에 문제가 없습니다.")
+    else:
+        user_answers_dict = {}
+        for idx, row in active_df.iterrows():
+            st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
+            ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
+            user_answers_dict[idx] = {
+                "question": row['문제 내용'],
+                "correct": row['모범 답안'],
+                "explanation": row['해설'],
+                "user_ans": ans
+            }
+            st.markdown("---")
 
-    if st.button("📝 전체 답안 일괄 채점 및 저장하기", type="primary", use_container_width=True):
-        with st.spinner("🤖 AI가 전체 답안을 채점 중입니다..."):
-            file_name = 'results.csv'
-            file_exists = os.path.isfile(file_name)
-            batch_results = []
+        if st.button("📝 전체 답안 일괄 채점 및 저장하기", type="primary", use_container_width=True):
+            with st.spinner("🤖 AI가 전체 답안을 채점 중입니다..."):
+                file_name = 'results.csv'
+                file_exists = os.path.isfile(file_name)
+                batch_results = []
 
-            for idx, data in user_answers_dict.items():
-                if not data["user_ans"]:
-                    continue
-                
-                prompt = f"""
-                너는 건축기사 실기 수석 채점관이야.
-                [문제]: {data['question']}
-                [모범 답안]: {data['correct']}
-                [학생 답안]: {data['user_ans']}
-                
-                핵심 키워드가 포함되었는지 엄격하게 평가하여 0~100점의 점수를 부여하고 피드백을 줘.
-                반드시 아래 형식으로 출력할 것:
-                1. 최종 점수: XX점
-                2. 피드백: (간단한 평가 및 누락된 키워드)
-                """
-                
-                try:
-                    response = client.chat.completions.create(
-                        model="gemini-3.6-flash",
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    res_text = response.choices[0].message.content
-                    score = extract_score(res_text)
-                except Exception as e:
-                    res_text = f"채점 오류: {str(e)}"
-                    score = 0
+                for idx, data in user_answers_dict.items():
+                    if not data["user_ans"]:
+                        continue
                     
-                batch_results.append({"question": data['question'], "user_ans": data['user_ans'], "score": score, "result": res_text})
-                
-                with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.writer(f)
-                    if not file_exists:
-                        writer.writerow(['선택한문제', '학생답안', '점수', 'AI채점결과'])
-                        file_exists = True
-                    writer.writerow([data['question'], data['user_ans'], score, res_text.replace('\n', ' ')])
+                    prompt = f"""
+                    너는 건축기사 실기 수석 채점관이야.
+                    [문제]: {data['question']}
+                    [모범 답안]: {data['correct']}
+                    [학생 답안]: {data['user_ans']}
+                    
+                    핵심 키워드가 포함되었는지 엄격하게 평가하여 0~100점의 점수를 부여하고 피드백을 줘.
+                    반드시 아래 형식으로 출력할 것:
+                    1. 최종 점수: XX점
+                    2. 피드백: (간단한 평가 및 누락된 키워드)
+                    """
+                    
+                    try:
+                        response = client.chat.completions.create(
+                            model="gemini-3.6-flash",
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        res_text = response.choices[0].message.content
+                        score = extract_score(res_text)
+                    except Exception as e:
+                        res_text = f"채점 오류: {str(e)}"
+                        score = 0
+                        
+                    batch_results.append({"question": data['question'], "user_ans": data['user_ans'], "score": score, "result": res_text})
+                    
+                    with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
+                        writer = csv.writer(f)
+                        if not file_exists:
+                            writer.writerow(['선택한문제', '학생답안', '점수', 'AI채점결과'])
+                            file_exists = True
+                        writer.writerow([data['question'], data['user_ans'], score, res_text.replace('\n', ' ')])
 
-            st.success("🎉 일괄 채점이 완료되었습니다! 결과를 확인하세요.")
-            for res in batch_results:
-                with st.expander(f"📌 [점수: {res['score']}점] {res['question'][:35]}..."):
-                    st.markdown(f"**내 답안:** {res['user_ans']}")
-                    st.markdown(f"**AI 채점 결과:**\n{res['result']}")
+                st.success("🎉 일괄 채점이 완료되었습니다! 결과를 확인하세요.")
+                for res in batch_results:
+                    with st.expander(f"📌 [점수: {res['score']}점] {res['question'][:35]}..."):
+                        st.markdown(f"**내 답안:** {res['user_ans']}")
+                        st.markdown(f"**AI 채점 결과:**\n{res['result']}")
 
 # ==================== [탭 3: 학습 분석 & 오답노트] ====================
 with main_tab3:
@@ -302,7 +303,6 @@ with main_tab3:
         
         res_df['대단원'], res_df['중단원'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
         
-        # 대단원 기준으로 그룹화
         major_stats = res_df.groupby('대단원').agg(
             평균점수=('점수', 'mean'),
             풀이횟수=('점수', 'count')
