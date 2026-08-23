@@ -15,7 +15,7 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. CSV 데이터 불러오기 (안전한 인코딩 처리)
+# 3. CSV 데이터 불러오기 (안전한 인코딩 처리 및 년도 포함 확인)
 try:
     try:
         df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
@@ -29,8 +29,8 @@ except FileNotFoundError:
 def find_chapter_info(q_text, full_df):
     matched = full_df[full_df['문제 내용'] == q_text]
     if not matched.empty:
-        return matched.iloc[0]['대단원'], matched.iloc[0]['중단원']
-    return "기타", "기타"
+        return matched.iloc[0]['대단원'], matched.iloc[0]['중단원'], matched.iloc[0].get('년도', '기타')
+    return "기타", "기타", "기타"
 
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
@@ -143,8 +143,9 @@ if st.session_state['active_tab_index'] == 0:
         
         correct_answer = row_data['모범 답안']
         explanation = row_data['해설']
+        question_year = row_data.get('년도', '정보 없음')
 
-        st.info(f"**[출제단원] 대단원: {row_data['대단원']}  |  중단원: {row_data['중단원']}**\n\n{selected_q}")
+        st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {row_data['대단원']}  |  중단원: {row_data['중단원']}**\n\n{selected_q}")
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
         if st.button("🤖 AI 채점 요청하기", type="primary"):
@@ -154,6 +155,7 @@ if st.session_state['active_tab_index'] == 0:
                 with st.spinner("AI 채점 중..."):
                     prompt = f"""
                     너는 건축기사 실기 수석 채점관이야.
+                    [출제 연도]: {question_year}
                     [문제]: {selected_q}
                     [모범 답안]: {correct_answer}
                     [상세 해설]: {explanation}
@@ -208,7 +210,7 @@ if st.session_state['active_tab_index'] == 0:
                     chat_history = [
                         {
                             "role": "system", 
-                            "content": f"너는 건축기사 수석 강사야. 현재 풀고 있는 문제는 '{selected_q}'이고 모범 답안은 '{correct_answer}', 해설은 '{explanation}'이야. 학생의 추가 질문에 친절하고 전문적으로 답해줘."
+                            "content": f"너는 건축기사 수석 강사야. 현재 풀고 있는 문제는 '{selected_q}' (출제연도: {question_year})이고 모범 답안은 '{correct_answer}', 해설은 '{explanation}'이야. 학생의 추가 질문에 친절하고 전문적으로 답해줘."
                         }
                     ] + st.session_state['messages']
 
@@ -245,7 +247,8 @@ elif st.session_state['active_tab_index'] == 1:
 
         user_answers_dict = {}
         for idx, row in exam_df.iterrows():
-            st.markdown(f"**Q{idx+1}. [{row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
+            q_year = row.get('년도', '정보 없음')
+            st.markdown(f"**Q{idx+1}. [{q_year} | {row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
             user_answers_dict[idx] = {
                 "question": row['문제 내용'],
@@ -325,7 +328,7 @@ elif st.session_state['active_tab_index'] == 2:
         # --- 대단원별 취약 챕터 분석 ---
         st.subheader("🚨 파트별 성적 분석 및 취약 파트 공부 추천")
         
-        res_df['대단원'], res_df['중단원'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
+        res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
         
         major_stats = res_df.groupby('대단원').agg(
             평균점수=('점수', 'mean'),
@@ -356,7 +359,7 @@ elif st.session_state['active_tab_index'] == 2:
         
         st.divider()
         st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
+        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
         
         if st.button("🗑️ 학습 기록 전체 초기화"):
             if os.path.isfile(results_file):
