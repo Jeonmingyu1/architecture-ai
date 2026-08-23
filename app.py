@@ -57,24 +57,35 @@ tab1, tab2 = st.tabs(["📝 기출문제 풀기 & AI 채점", "📊 나의 학�
 
 # ==================== [탭 1: 문제 풀이 화면] ====================
 with tab1:
-    st.sidebar.header("📚 학습 챕터 선택")
-    major_categories = df['대단원'].unique().tolist()
-    selected_major = st.sidebar.selectbox("대단원을 선택하세요:", major_categories)
+    st.sidebar.header("📚 학습 범위 설정")
+    
+    study_scope = st.sidebar.radio("출제 범위를 선택하세요:", ["챕터별 학습", "전체 챕터 랜덤 모의고사"])
+    
+    target_df = pd.DataFrame()
+    
+    if study_scope == "챕터별 학습":
+        major_categories = df['대단원'].unique().tolist()
+        selected_major = st.sidebar.selectbox("대단원을 선택하세요:", major_categories)
 
-    sub_df = df[df['대단원'] == selected_major]
-    sub_categories = sub_df['중단원'].unique().tolist()
-    selected_sub = st.sidebar.selectbox("중단원을 선택하세요:", sub_categories)
+        sub_df = df[df['대단원'] == selected_major]
+        sub_categories = sub_df['중단원'].unique().tolist()
+        selected_sub = st.sidebar.selectbox("중단원을 선택하세요:", sub_categories)
 
-    filtered_df = sub_df[sub_df['중단원'] == selected_sub]
-    all_questions = filtered_df['문제 내용'].tolist()
+        target_df = sub_df[sub_df['중단원'] == selected_sub]
+    else:
+        st.sidebar.info(f"전체 데이터베이스 총 문제 수: **{len(df)}개**")
+        num_questions = st.sidebar.slider("추출할 문제 수를 선택하세요:", min_value=5, max_value=30, value=10, step=5)
+        if 'random_exam_df' not in st.session_state or st.sidebar.button("🎲 새로운 랜덤 모의고사 문제 뽑기"):
+            st.session_state['random_exam_df'] = df.sample(n=min(num_questions, len(df))).reset_index(drop=True)
+        target_df = st.session_state['random_exam_df']
 
+    all_questions = target_df['문제 내용'].tolist()
     st.sidebar.divider()
-    st.sidebar.info(f"현재 챕터의 전체 문제 수: **{len(all_questions)}개**")
+    st.sidebar.info(f"현재 시험지 문항 수: **{len(all_questions)}개**")
 
     if not all_questions:
-        st.warning("해당 챕터에 등록된 문제가 없습니다.")
+        st.warning("등록된 문제가 없습니다.")
     else:
-        # 풀이 방식 선택 (한 문제씩 vs 여러 문제 한번에)
         solve_mode = st.radio(
             "⚙️ 풀이 방식을 선택하세요:", 
             ["단건 집중 풀이 (채팅 & 이어서 질문 가능)", "시험지 모드 (여러 문제 한 번에 풀고 일괄 채점)"], 
@@ -99,16 +110,17 @@ with tab1:
                 selected_q = st.session_state['current_random_q']
                 st.info(f"🎲 랜덤 출제된 문제입니다: **{selected_q}**")
 
-            match_rows = filtered_df[filtered_df['문제 내용'] == selected_q]
+            match_rows = target_df[target_df['문제 내용'] == selected_q]
             if match_rows.empty:
                 selected_q = all_questions[0]
-                row_data = filtered_df.iloc[0]
+                row_data = target_df.iloc[0]
             else:
                 row_data = match_rows.iloc[0]
 
             keyword = row_data['개념 키워드']
             correct_answer = row_data['모범 답안']
             explanation = row_data['해설']
+            current_sub = row_data['중단원']
 
             user_answer = st.text_area("✍️ 정답을 서술해 주세요:", key="user_answer_input")
 
@@ -117,7 +129,7 @@ with tab1:
                     st.warning("답안을 입력해주세요!")
                 else:
                     with st.spinner("🤖 채점 중입니다..."):
-                        rag_context = search_related_context(df, keyword, selected_sub, selected_q)
+                        rag_context = search_related_context(df, keyword, current_sub, selected_q)
                         
                         prompt = f"""
                         너는 건축기사 실기 국가자격증 시험의 수석 채점관이자 시공 기술사야.
@@ -205,20 +217,13 @@ with tab1:
         # ==================== 모드 B: 시험지 모드 (여러 문제 한 번에 풀기) ====================
         else:
             st.subheader("📑 시험지 모드 (여러 문제 일괄 풀이)")
-            st.markdown("선택한 챕터의 문제들이 아래에 쭉 나열됩니다. 답안을 각각 적고 하단의 **'전체 일괄 채점 및 저장'** 버튼을 누르세요!")
+            st.markdown("선택된 문제들이 아래에 쭉 나열됩니다. 답안을 각각 적고 하단의 **'전체 일괄 채점 및 저장'** 버튼을 누르세요!")
             
-            # 너무 많을 수 있으니 최대 10문제까지만 한 번에 보여주기
-            max_questions_to_show = min(len(filtered_df), 10)
-            target_df = filtered_df.head(max_questions_to_show)
-            
-            if len(filtered_df) > 10:
-                st.info(f"💡 원활한 채점을 위해 현재 챕터의 전체 {len(filtered_df)}개 문제 중 상위 10문제를 먼저 시험지 형태로 불러왔습니다.")
-
             user_answers_dict = {}
             
             for idx, row in target_df.iterrows():
                 q_text = row['문제 내용']
-                st.markdown(f"**Q. {q_text}**")
+                st.markdown(f"**Q. [{row['대단원']} > {row['중단원']}] {q_text}**")
                 ans_input = st.text_area(f"답안 작성 (문항 ID: {idx})", key=f"multi_ans_{idx}")
                 user_answers_dict[idx] = {
                     "question": q_text,
@@ -238,7 +243,6 @@ with tab1:
                     
                     for idx, data in user_answers_dict.items():
                         if not data["user_ans"]:
-                            # 답을 안 적은 경우 패스하거나 0점 처리
                             continue
                         
                         prompt = f"""
@@ -255,7 +259,7 @@ with tab1:
                         
                         try:
                             response = client.chat.completions.create(
-                                model="gemini-1.5-flash",
+                                model="gemini-3.6-flash",
                                 messages=[{"role": "user", "content": prompt}]
                             )
                             res_text = response.choices[0].message.content
@@ -271,7 +275,6 @@ with tab1:
                             "result": res_text
                         })
                         
-                        # CSV 저장
                         with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                             writer = csv.writer(f)
                             if not file_exists:
