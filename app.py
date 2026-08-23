@@ -65,7 +65,7 @@ with tab1:
     sub_categories = sub_df['중단원'].unique().tolist()
     selected_sub = st.sidebar.selectbox("중단원을 선택하세요:", sub_categories)
 
-    # 💡 챕터가 바뀌면 이전 랜덤 문제 기록 초기화
+    # 챕터가 바뀌면 이전 랜덤 문제 기록 초기화
     if 'prev_sub' not in st.session_state or st.session_state['prev_sub'] != selected_sub:
         st.session_state['prev_sub'] = selected_sub
         if 'current_random_q' in st.session_state:
@@ -84,22 +84,18 @@ with tab1:
         st.divider()
 
         if mode == "목록에서 직접 선택하기":
-            # 랜덤 상태 변수가 있다면 삭제하여 충돌 방지
             if 'current_random_q' in st.session_state:
                 del st.session_state['current_random_q']
             selected_q = st.selectbox("📌 문제를 선택하세요:", all_questions)
         else:
-            # 🎲 랜덤 문제 뽑기 모드
             if 'current_random_q' not in st.session_state or st.button("🎲 다른 랜덤 문제 뽑기"):
                 st.session_state['current_random_q'] = random.choice(all_questions)
             
             selected_q = st.session_state['current_random_q']
             st.info(f"🎲 랜덤 출제된 문제입니다: **{selected_q}**")
 
-        # 안전하게 데이터 매칭
         match_rows = filtered_df[filtered_df['문제 내용'] == selected_q]
         if match_rows.empty:
-            # 혹시라도 불일치 발생 시 첫 번째 문제로 강제 지정
             selected_q = all_questions[0]
             row_data = filtered_df.iloc[0]
         else:
@@ -143,7 +139,7 @@ with tab1:
                     """
 
                     response = client.chat.completions.create(
-                        model="gemini-3.6-flash", 
+                        model="gemini-2.5-flash", 
                         messages=[{"role": "user", "content": prompt}]
                     )
 
