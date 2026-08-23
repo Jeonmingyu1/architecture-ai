@@ -19,12 +19,13 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
 )
 
-# 3. CSV 데이터 불러오기 (인코딩 에러 방지)
+# 3. CSV 데이터 불러오기 (파싱 에러 방지 엔진 및 인코딩 적용)
 try:
-  df = pd.read_csv("data.csv", encoding="utf-8-sig")
+  # engine='python'과 on_bad_lines를 적용하여 쉼표/줄바꿈 에러 방지
+  df = pd.read_csv("data.csv", encoding="utf-8-sig", engine="python")
 except Exception:
   try:
-    df = pd.read_csv("data.csv", encoding="cp949")
+    df = pd.read_csv("data.csv", encoding="cp949", engine="python")
   except FileNotFoundError:
     st.error(
         "⚠️ 'data.csv' 파일이 없습니다. 프로젝트 폴더 안에 data.csv 파일을"
@@ -172,7 +173,6 @@ if st.session_state["active_tab_index"] == 0:
         " 버튼을 눌러주세요."
     )
   else:
-    # 셀렉트박스 표시명에 문제 내용 + (출제연도) 포함
     q_options = [
         f"({row['년도']}) {row['문제 내용']}" for idx, row in target_df.iterrows()
     ]
@@ -339,7 +339,6 @@ elif st.session_state["active_tab_index"] == 1:
 
     user_answers_dict = {}
     for idx, row in exam_df.iterrows():
-      # 문제 번호 바로 옆에 연도와 회차를 괄호로 작게 표시
       st.markdown(
           f"**Q{idx+1}. {row['문제 내용']}** &nbsp; <span"
           f" style='color:gray; font-size:0.85em;'>({row['년도']})"
@@ -431,7 +430,7 @@ elif st.session_state["active_tab_index"] == 2:
   if not os.path.isfile(results_file):
     st.info("💡 아직 저장된 학습 기록이 없습니다. 문제를 풀고 채점해 보세요!")
   else:
-    res_df = pd.read_csv(results_file, encoding="utf-8-sig")
+    res_df = pd.read_csv(results_file, encoding="utf-8-sig", engine="python")
     total = len(res_df)
     avg = res_df["점수"].mean() if total > 0 else 0
 
