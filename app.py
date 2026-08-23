@@ -46,41 +46,44 @@ if 'target_weak_major' not in st.session_state:
 if 'scope_mode' not in st.session_state:
     st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
-# ==================== [상단 제어 바: 학습 범위만 깔끔하게 선택] ====================
+# ==================== [상단 제어 바: 학습 범위 설정] ====================
 st.markdown("### 🎛️ 1단계: 학습 범위 설정")
 
 scope_options = ["전체 챕터 랜덤", "대단원별 선택", "🚨 자주 틀린 취약 대단원 집중 공략"]
 
-current_mode = st.session_state['scope_mode']
-if current_mode not in scope_options:
-    current_mode = "전체 챕터 랜덤"
-    st.session_state['scope_mode'] = current_mode
-
-default_idx = scope_options.index(current_mode)
+# 현재 세션 상태의 모드가 옵션에 없으면 기본값으로 보정
+if st.session_state['scope_mode'] not in scope_options:
+    st.session_state['scope_mode'] = "전체 챕터 랜덤"
 
 c_scope, c_detail = st.columns([1.5, 2.5])
 
 with c_scope:
-    scope_type = st.selectbox("출제 범위 선택", scope_options, index=default_idx, key="scope_selector")
+    # selectbox의 값과 st.session_state['scope_mode']를 완전히 동기화
+    selected_scope = st.selectbox(
+        "출제 범위 선택", 
+        scope_options, 
+        index=scope_options.index(st.session_state['scope_mode']), 
+        key="scope_selector"
+    )
 
-# 모드가 바뀌었을 때 초기화
-if scope_type != st.session_state['scope_mode']:
-    st.session_state['scope_mode'] = scope_type
-    if scope_type != "🚨 자주 틀린 취약 대단원 집중 공략":
+# 사용자가 직접 selectbox를 바꿨을 때 처리
+if selected_scope != st.session_state['scope_mode']:
+    st.session_state['scope_mode'] = selected_scope
+    if selected_scope != "🚨 자주 틀린 취약 대단원 집중 공략":
         st.session_state['target_weak_major'] = None
-    if 'current_exam_df' in st.session_state:
-        del st.session_state['current_exam_df']
+    if 'batch_exam_df' in st.session_state:
+        del st.session_state['batch_exam_df']
     st.rerun()
 
 target_df = pd.DataFrame()
 
-if scope_type == "전체 챕터 랜덤":
+if st.session_state['scope_mode'] == "전체 챕터 랜덤":
     st.session_state['target_weak_major'] = None
     with c_detail:
         st.markdown("<br><b>전체 데이터베이스 대상 (모든 챕터 포함)</b>", unsafe_allow_html=True)
     target_df = df
 
-elif scope_type == "대단원별 선택":
+elif st.session_state['scope_mode'] == "대단원별 선택":
     with c_detail:
         major_list = df['대단원'].unique().tolist()
         prev_major = st.session_state.get('selected_major_val', major_list[0])
@@ -90,8 +93,8 @@ elif scope_type == "대단원별 선택":
     
     if selected_major != st.session_state.get('selected_major_val'):
         st.session_state['selected_major_val'] = selected_major
-        if 'current_exam_df' in st.session_state:
-            del st.session_state['current_exam_df']
+        if 'batch_exam_df' in st.session_state:
+            del st.session_state['batch_exam_df']
         st.rerun()
 
     target_df = df[df['대단원'] == selected_major]
@@ -117,7 +120,7 @@ with main_tab1:
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
-        st.warning("선택된 범위에 문제가 없습니다. 범위를 다시 확인해주세요.")
+        st.warning("선택된 범위에 문제가 없거나 집중 공략할 대단원이 지정되지 않았습니다. 3단계(오답노트)에서 '집중 공략' 버튼을 눌러주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list, key="single_q_select")
         row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
@@ -206,7 +209,7 @@ with main_tab2:
     st.markdown("#### 📑 여러 문제를 시험지처럼 지정한 문항 수만큼 뽑아서 한 번에 풀고 채점하는 모드입니다.")
     
     if target_df.empty:
-        st.warning("선택된 범위에 문제가 없습니다.")
+        st.warning("선택된 범위에 문제가 없습니다. (취약 챕터 모드인 경우 3단계 오답노트에서 '집중 공략' 버튼을 먼저 눌러주세요)")
     else:
         # 시험지 모드 전용 컨트롤러 (추출 문항 수 + 랜덤 뽑기 버튼)
         c_cnt, c_action = st.columns([2, 2])
