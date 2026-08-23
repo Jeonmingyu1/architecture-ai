@@ -74,22 +74,18 @@ with tab1:
     if not all_questions:
         st.warning("해당 챕터에 등록된 문제가 없습니다.")
     else:
-        # 🎲 메인 화면 상단에 학습 방식 선택 (목록에서 고르기 vs 랜덤 뽑기)
         mode = st.radio("🔍 문제 풀이 방식을 선택하세요:", ["목록에서 직접 선택하기", "🎲 랜덤으로 문제 뽑기"], horizontal=True)
-        
         st.divider()
 
         if mode == "목록에서 직접 선택하기":
             selected_q = st.selectbox("📌 문제를 선택하세요:", all_questions)
         else:
-            # 세션 스테이트를 이용해 랜덤 문제 고정 및 새로 뽑기 기능 구현
             if 'current_random_q' not in st.session_state or st.button("🎲 다른 랜덤 문제 뽑기"):
                 st.session_state['current_random_q'] = random.choice(all_questions)
             
             selected_q = st.session_state['current_random_q']
             st.info(f"🎲 랜덤 출제된 문제입니다: **{selected_q}**")
 
-        # 선택된 문제의 데이터 가져오기
         row_data = filtered_df[filtered_df['문제 내용'] == selected_q].iloc[0]
         keyword = row_data['개념 키워드']
         correct_answer = row_data['모범 답안']
@@ -162,27 +158,43 @@ with tab2:
         st.info("💡 아직 풀고 저장한 문제 기록이 없습니다. '기출문제 풀기' 탭에서 문제를 풀고 채점을 진행해 보세요!")
     else:
         res_df = pd.read_csv(results_file, encoding='utf-8-sig')
-        
         total_solved = len(res_df)
         
         if '점수' in res_df.columns and total_solved > 0:
             avg_score = res_df['점수'].mean()
-            col1, col2 = st.columns(2)
+            
+            # 1. 상단 핵심 지표 컬럼 배치
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric(label="총 풀이 및 채점 횟수", value=f"{total_solved}회")
+                st.metric(label="총 풀이 횟수", value=f"{total_solved}회")
             with col2:
                 st.metric(label="평균 취득 점수", value=f"{avg_score:.1f}점")
+            with col3:
+                # 합격 기준(60점) 기준 상태 메시지
+                status = "🎯 합격 안정권" if avg_score >= 60 else "⚠️ 집중 학습 필요"
+                st.metric(label="현재 학습 성취도", value=status)
             
             st.divider()
+            
+            # 2. 점수 추이 그래프
             st.subheader("📊 학습 점수 추이 그래프")
             st.line_chart(res_df['점수'])
+            
+            st.divider()
+            
+            # 3. 오답노트 전용 필터링 기능 (60점 미만 모아보기)
+            st.subheader("📋 오답노트 및 전체 학습 기록")
+            only_weak = st.checkbox("❌ 60점 미만 오답 문제만 모아서 보기")
+            
+            display_df = res_df[res_df['점수'] < 60] if only_weak else res_df
+            
+            st.dataframe(display_df, use_container_width=True)
+            
         else:
-            st.metric(label="총 풀이 및 `채점 횟수", value=f"{total_solved}회")
+            st.metric(label="총 풀이 횟수", value=f"{total_solved}회")
+            st.dataframe(res_df, use_container_width=True)
         
         st.divider()
-        st.subheader("📋 전체 채점 및 오답노트 기록")
-        st.dataframe(res_df, use_container_width=True)
-        
         if st.button("🗑️ 학습 기록 초기화하기"):
             if os.path.isfile(results_file):
                 os.remove(results_file)
