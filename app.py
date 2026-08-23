@@ -73,7 +73,7 @@ with tab1:
             if not user_answer:
                 st.warning("답안을 입력해주세요!")
             else:
-                with st.spinner("🤖 엄격한 AI 채점관이 RAG 데이터를 참고하여 채점 중입니다..."):
+                with st.spinner("🤖 채점 중입니다..."):
                     
                     rag_context = search_related_context(df, keyword, selected_q)
                     
