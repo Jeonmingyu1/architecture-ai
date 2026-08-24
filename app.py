@@ -15,7 +15,7 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. CSV 데이터 불러오기
+# 3. CSV 데이터 불러오기 및 4대 과목 자동 재분류 적용
 try:
     try:
         df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
@@ -25,10 +25,32 @@ except FileNotFoundError:
     st.error("⚠️ 'data.csv' 파일이 없습니다. 폴더 안에 data.csv 파일을 먼저 위치시켜 주세요!")
     st.stop()
 
-# 데이터 정제
+# 데이터 전처리 및 새로운 4대 대단원('건축시공', '공정관리', '건축적산', '건축구조') 매핑 함수
 df['대단원'] = df['대단원'].astype(str).str.strip()
 df['중단원'] = df['중단원'].astype(str).str.strip()
 df['문제 내용'] = df['문제 내용'].astype(str).str.strip()
+
+def reclassify_app_units(row):
+    text = str(row['문제 내용'])
+    old_major = str(row['대단원'])
+    old_middle = str(row['중단원'])
+    combined = old_major + " " + old_middle + " " + text
+    
+    # 1) 공정관리
+    if any(k in combined for k in ['공정', '네트워크', 'CPM', '공정표', 'VE', '가치공학', '선행작업', '후행작업']):
+        return '공정관리'
+    # 2) 건축적산
+    elif any(k in combined for k in ['적산', '견적', '수량', '단가', '공사비', '물량산출']):
+        return '건축적산'
+    # 3) 건축구조
+    elif any(k in combined for k in ['구조역학', '모멘트', '단면2차', '응력', '보의', '하중', '처짐', '철근콘크리트 구조', '철골구조', '내진', '휨모멘트']):
+        return '건축구조'
+    # 4) 건축시공 (나머지 전체)
+    else:
+        return '건축시공'
+
+# 앱 내부에서 대단원 컬럼을 확정된 4가지로 통일
+df['대단원'] = df.apply(reclassify_app_units, axis=1)
 
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
@@ -55,7 +77,6 @@ if 'active_tab_index' not in st.session_state:
 # ==================== [사이드바: 학습 범위 설정] ====================
 st.sidebar.markdown("### 🎛️ 공부할 범위 고르기")
 
-# 현재 모드 표시
 current_mode = st.session_state['scope_mode']
 st.sidebar.markdown(f"현재 학습 모드: **{current_mode}**")
 
@@ -175,7 +196,6 @@ if st.session_state['active_tab_index'] == 0:
                         writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
 
-        # --- 이어서 질문하기 ---
         st.divider()
         st.markdown("##### 💬 AI에게 이어서 질문하기")
         if 'messages' not in st.session_state:
@@ -304,7 +324,10 @@ elif st.session_state['active_tab_index'] == 2:
     else:
         res_df = pd.read_csv(results_file, encoding='utf-8-sig')
         if '대단원' not in res_df.columns:
-            res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: (df[df['문제 내용'] == x].iloc[0]['대단원'] if not df[df['문제 내용'] == x].empty else '기타', '기타', '기타')))
+            res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: (df[df['문제 내용'] == x].iloc[0]['대단원'] if not df[df['문제 내용'] == x].empty else '건축시공', '기타', '기타')))
+        else:
+            # 기존 results.csv에 저장된 대단원명도 새 기준으로 동기화
+            res_df['대단원'] = res_df['대단원'].apply(lambda m: m if m in ['건축시공', '공정관리', '건축적산', '건축구조'] else '건축시공')
 
         total = len(res_df)
         avg = res_df['점수'].mean() if total > 0 else 0
@@ -336,11 +359,10 @@ elif st.session_state['active_tab_index'] == 2:
                 with col_info:
                     st.markdown(f"- 📂 **파트: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    # 고유하고 확실한 버튼 동작 부여
                     if st.button(f"🎯 집중 공략", key=f"fixed_focus_btn_{idx}", type="primary"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 취약 파트 공부"
-                        st.session_state['active_tab_index'] = 0  # 1단계로 이동
+                        st.session_state['active_tab_index'] = 0 
                         if 'batch_exam_df' in st.session_state:
                             del st.session_state['batch_exam_df']
                         st.rerun()
