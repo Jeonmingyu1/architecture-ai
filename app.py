@@ -15,7 +15,7 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. CSV 데이터 불러오기 (안전한 인코딩 처리 및 년도 포함 확인)
+# 3. CSV 데이터 불러오기 (안전한 인코딩 처리)
 try:
     try:
         df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
@@ -24,6 +24,10 @@ try:
 except FileNotFoundError:
     st.error("⚠️ 'data.csv' 파일이 없습니다. 폴더 안에 data.csv 파일을 먼저 위치시켜 주세요!")
     st.stop()
+
+# 공백 제거 및 데이터 정제 (매칭 오류 방지)
+df['대단원'] = df['대단원'].astype(str).str.strip()
+df['중단원'] = df['중단원'].astype(str).str.strip()
 
 # --- 헬퍼 함수 ---
 def find_chapter_info(q_text, full_df):
@@ -49,7 +53,8 @@ if 'scope_mode' not in st.session_state:
 if 'target_weak_major' not in st.session_state:
     st.session_state['target_weak_major'] = None
 if 'selected_major_val' not in st.session_state:
-    st.session_state['selected_major_val'] = df['대단원'].unique().tolist()[0] if not df.empty else ""
+    major_unique = df['대단원'].unique().tolist()
+    st.session_state['selected_major_val'] = major_unique[0] if major_unique else ""
 if 'active_tab_index' not in st.session_state:
     st.session_state['active_tab_index'] = 0
 
@@ -95,7 +100,7 @@ elif st.session_state['scope_mode'] == "📚 챕터별 학습":
     selected_major = st.sidebar.selectbox(
         "공부할 대단원 선택", 
         major_list, 
-        index=major_list.index(prev_major) if major_list else 0, 
+        index=major_list.index(prev_major) if prev_major in major_list else 0, 
         key="sidebar_major_select_unique"
     )
     
@@ -112,6 +117,8 @@ else:  # 취약 파트 공부
     if weak_major:
         st.sidebar.warning(f"🚨 **집중 공부 중인 파트:**\n\n**{weak_major}**")
         target_df = df[df['대단원'] == weak_major]
+        if target_df.empty:
+            st.sidebar.error(f"⚠️ '{weak_major}'에 해당하는 문제를 CSV에서 찾지 못했습니다. 대단원 이름을 확인해주세요.")
     else:
         st.sidebar.error("⚠️ 아직 지정된 취약 파트가 없습니다.\n\n'3단계' 오답노트에서 **[🎯 집중 공략]** 버튼을 눌러보세요!")
         target_df = pd.DataFrame()
