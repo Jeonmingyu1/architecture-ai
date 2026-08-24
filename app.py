@@ -15,7 +15,7 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. CSV 데이터 불러오기 (안전한 인코딩 처리)
+# 3. CSV 데이터 불러오기
 try:
     try:
         df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
@@ -25,7 +25,7 @@ except FileNotFoundError:
     st.error("⚠️ 'data.csv' 파일이 없습니다. 폴더 안에 data.csv 파일을 먼저 위치시켜 주세요!")
     st.stop()
 
-# 공백 제거 및 데이터 정제 (매칭 오류 방지)
+# 데이터 정제
 df['대단원'] = df['대단원'].astype(str).str.strip()
 df['중단원'] = df['중단원'].astype(str).str.strip()
 df['문제 내용'] = df['문제 내용'].astype(str).str.strip()
@@ -55,89 +55,73 @@ if 'active_tab_index' not in st.session_state:
 # ==================== [사이드바: 학습 범위 설정] ====================
 st.sidebar.markdown("### 🎛️ 공부할 범위 고르기")
 
-scope_options = [
-    "🎲 전체 챕터", 
-    "📚 챕터별 학습", 
-    "🚨 취약 파트 공부"
-]
+# 현재 모드 표시
+current_mode = st.session_state['scope_mode']
+st.sidebar.markdown(f"현재 학습 모드: **{current_mode}**")
 
-if st.session_state['scope_mode'] not in scope_options:
+if st.sidebar.button("🎲 전체 챕터로 변경", use_container_width=True):
     st.session_state['scope_mode'] = "🎲 전체 챕터"
-
-selected_scope = st.sidebar.radio(
-    "학습 모드 선택", 
-    scope_options, 
-    index=scope_options.index(st.session_state['scope_mode']),
-    key="sidebar_scope_radio_unique"
-)
-
-if selected_scope != st.session_state['scope_mode']:
-    st.session_state['scope_mode'] = selected_scope
-    if selected_scope != "🚨 취약 파트 공부":
-        st.session_state['target_weak_major'] = None
+    st.session_state['target_weak_major'] = None
     if 'batch_exam_df' in st.session_state:
         del st.session_state['batch_exam_df']
     st.rerun()
 
-target_df = pd.DataFrame()
 major_list = df['대단원'].unique().tolist() if not df.empty else []
+selected_major_sb = st.sidebar.selectbox("📚 챕터별 학습 (대단원 선택)", major_list)
+if st.sidebar.button("📚 선택한 챕터로 공부 시작", use_container_width=True):
+    st.session_state['scope_mode'] = "📚 챕터별 학습"
+    st.session_state['selected_major_val'] = selected_major_sb
+    st.session_state['target_weak_major'] = None
+    if 'batch_exam_df' in st.session_state:
+        del st.session_state['batch_exam_df']
+    st.rerun()
 
-if st.session_state['scope_mode'] == "🎲 전체 챕터":
-    st.sidebar.info("📂 **모드 설명:** 모든 파트의 문제가 무작위로 섞여서 출제됩니다.")
-    target_df = df
-
-elif st.session_state['scope_mode'] == "📚 챕터별 학습":
-    prev_major = st.session_state['selected_major_val']
-    if prev_major not in major_list and major_list:
-        prev_major = major_list[0]
-        
-    selected_major = st.sidebar.selectbox(
-        "공부할 대단원 선택", 
-        major_list, 
-        index=major_list.index(prev_major) if prev_major in major_list else 0, 
-        key="sidebar_major_select_unique"
-    )
-    
-    if selected_major != st.session_state['selected_major_val']:
-        st.session_state['selected_major_val'] = selected_major
-        if 'batch_exam_df' in st.session_state:
-            del st.session_state['batch_exam_df']
-        st.rerun()
-
-    target_df = df[df['대단원'] == st.session_state['selected_major_val']]
-
-else:  # 취약 파트 공부
-    weak_major = st.session_state['target_weak_major']
-    if weak_major:
-        st.sidebar.warning(f"🚨 **집중 공부 중인 파트:**\n\n**{weak_major}**")
-        target_df = df[df['대단원'] == weak_major]
-        if target_df.empty:
-            st.sidebar.error(f"⚠️ '{weak_major}'에 해당하는 문제를 찾지 못했습니다.")
-    else:
-        st.sidebar.error("⚠️ 지정된 취약 파트가 없습니다.\n\n'3단계' 성적표에서 **[🎯 집중 공략]** 버튼을 눌러주세요!")
-        target_df = pd.DataFrame()
+if st.session_state['scope_mode'] == "🚨 취약 파트 공부" and st.session_state['target_weak_major']:
+    st.sidebar.warning(f"🚨 **집중 공략 중인 파트:**\n\n**{st.session_state['target_weak_major']}**")
 
 st.sidebar.divider()
 
-# ==================== [메인 메뉴 네비게이션] ====================
-tab_titles = ["🎯 1단계: 문제 풀기 & AI 채팅", "📑 2단계: 시험지 모드 (일괄 풀이)", "📊 3단계: 나의 성적표 & 오답노트"]
+# --- 대상 데이터프레임 필터링 로직 ---
+target_df = pd.DataFrame()
+if st.session_state['scope_mode'] == "🎲 전체 챕터":
+    target_df = df
+elif st.session_state['scope_mode'] == "📚 챕터별 학습":
+    target_df = df[df['대단원'] == st.session_state['selected_major_val']]
+elif st.session_state['scope_mode'] == "🚨 취약 파트 공부":
+    weak_m = st.session_state['target_weak_major']
+    if weak_m:
+        target_df = df[df['대단원'] == weak_m]
+    else:
+        target_df = df
 
-selected_tab_str = st.radio("메뉴 이동", tab_titles, index=st.session_state['active_tab_index'], horizontal=True, label_visibility="collapsed", key="top_menu_radio")
+# ==================== [메인 상단 네비게이션 버튼] ====================
+col_t1, col_t2, col_t3 = st.columns(3)
 
-current_tab_idx = tab_titles.index(selected_tab_str)
-if current_tab_idx != st.session_state['active_tab_index']:
-    st.session_state['active_tab_index'] = current_tab_idx
-    st.rerun()
+with col_t1:
+    if st.button("🎯 1단계: 문제 풀기 & AI", use_container_width=True, type="primary" if st.session_state['active_tab_index']==0 else "secondary"):
+        st.session_state['active_tab_index'] = 0
+        st.rerun()
+with col_t2:
+    if st.button("📑 2단계: 시험지 모드", use_container_width=True, type="primary" if st.session_state['active_tab_index']==1 else "secondary"):
+        st.session_state['active_tab_index'] = 1
+        st.rerun()
+with col_t3:
+    if st.button("📊 3단계: 성적표 & 오답", use_container_width=True, type="primary" if st.session_state['active_tab_index']==2 else "secondary"):
+        st.session_state['active_tab_index'] = 2
+        st.rerun()
 
 st.divider()
 
 # ==================== [탭 1: 한 문제씩 풀기 + 이어서 질문하기] ====================
 if st.session_state['active_tab_index'] == 0:
-    st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 상세 피드백과 추가 질문을 주고받는 모드입니다.")
+    if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
+        st.info(f"🚨 현재 **[{st.session_state['target_weak_major']}]** 파트 집중 공략 모드입니다!")
+    else:
+        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 상세 피드백과 추가 질문을 주고받는 모드입니다.")
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
-        st.warning("⚠️ 선택된 범위에 문제가 없거나 공략할 파트가 지정되지 않았습니다. 사이드바나 3단계(성적표)에서 파트를 다시 선택해 주세요.")
+        st.warning("⚠️ 선택된 범위에 문제가 없습니다. 사이드바나 3단계 성적표에서 파트를 다시 선택해 주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list, key="single_q_select")
         row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
@@ -191,11 +175,9 @@ if st.session_state['active_tab_index'] == 0:
                         writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
 
-        # --- 이어서 질문하기 (채팅 영역) ---
+        # --- 이어서 질문하기 ---
         st.divider()
         st.markdown("##### 💬 AI에게 이어서 질문하기")
-        st.caption("채점 결과에 대해 궁금한 점이나 더 알고 싶은 개념을 자유롭게 물어보세요!")
-
         if 'messages' not in st.session_state:
             st.session_state['messages'] = []
 
@@ -230,7 +212,7 @@ elif st.session_state['active_tab_index'] == 1:
     st.markdown("#### 📑 여러 문제를 시험지처럼 지정한 문항 수만큼 뽑아서 한 번에 풀고 채점하는 모드입니다.")
     
     if target_df.empty:
-        st.warning("⚠️ 선택된 범위에 문제가 없습니다. 사이드바 설정을 확인해주세요.")
+        st.warning("⚠️ 선택된 범위에 문제가 없습니다.")
     else:
         c_cnt, c_action = st.columns([2, 2])
         with c_cnt:
@@ -306,7 +288,7 @@ elif st.session_state['active_tab_index'] == 1:
                             file_exists = True
                         writer.writerow([data['question'], data['major'], data['sub'], data['year'], data['user_ans'], score, res_text.replace('\n', ' ')])
 
-                st.success("🎉 일괄 채점이 완료되었습니다! 결과를 확인하세요.")
+                st.success("🎉 일괄 채점이 완료되었습니다!")
                 for res in batch_results:
                     with st.expander(f"📌 [점수: {res['score']}점] {res['question'][:35]}..."):
                         st.markdown(f"**내 답안:** {res['user_ans']}")
@@ -320,7 +302,6 @@ elif st.session_state['active_tab_index'] == 2:
     if not os.path.isfile(results_file):
         st.info("💡 아직 저장된 학습 기록이 없습니다. 문제를 풀고 채점해 보세요!")
     else:
-        # 기존 results.csv에 대단원 컬럼이 없을 경우를 대비한 방어 코드
         res_df = pd.read_csv(results_file, encoding='utf-8-sig')
         if '대단원' not in res_df.columns:
             res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: (df[df['문제 내용'] == x].iloc[0]['대단원'] if not df[df['문제 내용'] == x].empty else '기타', '기타', '기타')))
@@ -335,9 +316,7 @@ elif st.session_state['active_tab_index'] == 2:
         
         st.divider()
         
-        # --- 대단원별 취약 챕터 분석 ---
         st.subheader("🚨 파트별 성적 분석 및 취약 파트 공부 추천")
-        
         major_stats = res_df.groupby('대단원').agg(
             평균점수=('점수', 'mean'),
             풀이횟수=('점수', 'count')
@@ -346,7 +325,7 @@ elif st.session_state['active_tab_index'] == 2:
         weak_majors = major_stats.sort_values(by='평균점수', ascending=True)
         
         if not weak_majors.empty:
-            st.markdown("👇 점수가 낮게 나온 파트의 **[🎯 집중 공략]** 버튼을 누르면, 곧바로 해당 파트 모드로 바뀌며 **1단계 문제 풀이 탭**으로 이동합니다!")
+            st.markdown("👇 점수가 낮게 나온 파트의 **[🎯 집중 공략]** 버튼을 누르면, 곧바로 해당 파트의 문제만 풀 수 있도록 1단계 화면으로 이동합니다!")
             
             for idx, row in weak_majors.head(5).iterrows():
                 major_name = row['대단원']
@@ -357,10 +336,11 @@ elif st.session_state['active_tab_index'] == 2:
                 with col_info:
                     st.markdown(f"- 📂 **파트: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    if st.button(f"🎯 집중 공략", key=f"weak_btn_fixed_{idx}", type="primary"):
+                    # 고유하고 확실한 버튼 동작 부여
+                    if st.button(f"🎯 집중 공략", key=f"fixed_focus_btn_{idx}", type="primary"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 취약 파트 공부"
-                        st.session_state['active_tab_index'] = 0  # 1단계 탭으로 강제 이동
+                        st.session_state['active_tab_index'] = 0  # 1단계로 이동
                         if 'batch_exam_df' in st.session_state:
                             del st.session_state['batch_exam_df']
                         st.rerun()
