@@ -1,26 +1,28 @@
 import pandas as pd
 
-# 1. 기존 data.csv 불러오기
+# 1. 인코딩 에러 방지하며 data.csv 읽기
 try:
     df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
-except UnicodeDecodeError:
+except:
     df = pd.read_csv('data.csv', encoding='cp949', engine='python', on_bad_lines='skip')
 
-print(f"정제 전 문제 수: {len(df)}개")
+print(f"정제 전 총 문제 수: {len(df)}")
 
-# 2. 강력한 제외 키워드 설정 (그림, 기호, 공정표, 도면, 네트워크 등 포함된 것 전부 컷)
-def strict_exclude(text):
+# 2. 그림, 기호, 공정표, 도면 등이 들어간 문제 내용 필터링 조건
+keywords = ['공정표', '네트워크', '도면', '스케치', '작도', '그림', '기호']
+
+def is_excluded(text):
     text = str(text)
-    keywords = ['공정표', '네트워크', '도면', '스케치', '작도', '그림', '기호']
     for kw in keywords:
         if kw in text:
             return True
     return False
 
-# 3. 필터링 적용
-filtered_df = df[~df['문제 내용'].apply(strict_exclude)].copy()
+# 3. 제외 대상이 아닌 순수 문제들만 추출
+clean_df = df[~df['문제 내용'].apply(is_excluded)].copy()
 
-# 4. data.csv로 저장
-filtered_df.to_csv('data.csv', index=False, encoding='utf-8-sig')
+# 4. 기존 data.csv 파일을 완전히 덮어쓰기 저장
+clean_df.to_csv('data.csv', index=False, encoding='utf-8-sig')
 
-print(f"정제 완료! 남은 문제 수: {len(filtered_df)}개 (data.csv 저장됨)")
+print(f"정제 후 남은 문제 수: {len(clean_df)}")
+print("data.csv 파일이 성공적으로 갱신되었습니다!")
