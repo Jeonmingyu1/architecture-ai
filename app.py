@@ -28,13 +28,7 @@ except FileNotFoundError:
 # 공백 제거 및 데이터 정제 (매칭 오류 방지)
 df['대단원'] = df['대단원'].astype(str).str.strip()
 df['중단원'] = df['중단원'].astype(str).str.strip()
-
-# --- 헬퍼 함수 ---
-def find_chapter_info(q_text, full_df):
-    matched = full_df[full_df['문제 내용'] == q_text]
-    if not matched.empty:
-        return matched.iloc[0]['대단원'], matched.iloc[0]['중단원'], matched.iloc[0].get('년도', '기타')
-    return "기타", "기타", "기타"
+df['문제 내용'] = df['문제 내용'].astype(str).str.strip()
 
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
@@ -118,9 +112,9 @@ else:  # 취약 파트 공부
         st.sidebar.warning(f"🚨 **집중 공부 중인 파트:**\n\n**{weak_major}**")
         target_df = df[df['대단원'] == weak_major]
         if target_df.empty:
-            st.sidebar.error(f"⚠️ '{weak_major}'에 해당하는 문제를 CSV에서 찾지 못했습니다. 대단원 이름을 확인해주세요.")
+            st.sidebar.error(f"⚠️ '{weak_major}'에 해당하는 문제를 찾지 못했습니다.")
     else:
-        st.sidebar.error("⚠️ 아직 지정된 취약 파트가 없습니다.\n\n'3단계' 오답노트에서 **[🎯 집중 공략]** 버튼을 눌러보세요!")
+        st.sidebar.error("⚠️ 지정된 취약 파트가 없습니다.\n\n'3단계' 성적표에서 **[🎯 집중 공략]** 버튼을 눌러주세요!")
         target_df = pd.DataFrame()
 
 st.sidebar.divider()
@@ -143,7 +137,7 @@ if st.session_state['active_tab_index'] == 0:
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
-        st.warning("⚠️ 선택된 범위에 문제가 없거나 공략할 파트가 지정되지 않았습니다. 사이드바 설정을 확인하시거나 3단계(오답노트)에서 [🎯 집중 공략] 버튼을 눌러주세요.")
+        st.warning("⚠️ 선택된 범위에 문제가 없거나 공략할 파트가 지정되지 않았습니다. 사이드바나 3단계(성적표)에서 파트를 다시 선택해 주세요.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list, key="single_q_select")
         row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
@@ -151,8 +145,10 @@ if st.session_state['active_tab_index'] == 0:
         correct_answer = row_data['모범 답안']
         explanation = row_data['해설']
         question_year = row_data.get('년도', '정보 없음')
+        q_major = row_data['대단원']
+        q_sub = row_data['중단원']
 
-        st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {row_data['대단원']}  |  중단원: {row_data['중단원']}**\n\n{selected_q}")
+        st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {q_major}  |  중단원: {q_sub}**\n\n{selected_q}")
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
         if st.button("🤖 AI 채점 요청하기", type="primary"):
@@ -191,8 +187,8 @@ if st.session_state['active_tab_index'] == 0:
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                         writer = csv.writer(f)
                         if not file_exists:
-                            writer.writerow(['선택한문제', '학생답안', '점수', 'AI채점결과'])
-                        writer.writerow([selected_q, user_ans, score, result_text.replace('\n', ' ')])
+                            writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
+                        writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
 
         # --- 이어서 질문하기 (채팅 영역) ---
@@ -259,6 +255,9 @@ elif st.session_state['active_tab_index'] == 1:
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
             user_answers_dict[idx] = {
                 "question": row['문제 내용'],
+                "major": row['대단원'],
+                "sub": row['중단원'],
+                "year": q_year,
                 "correct": row['모범 답안'],
                 "explanation": row['해설'],
                 "user_ans": ans
@@ -303,9 +302,9 @@ elif st.session_state['active_tab_index'] == 1:
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                         writer = csv.writer(f)
                         if not file_exists:
-                            writer.writerow(['선택한문제', '학생답안', '점수', 'AI채점결과'])
+                            writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
                             file_exists = True
-                        writer.writerow([data['question'], data['user_ans'], score, res_text.replace('\n', ' ')])
+                        writer.writerow([data['question'], data['major'], data['sub'], data['year'], data['user_ans'], score, res_text.replace('\n', ' ')])
 
                 st.success("🎉 일괄 채점이 완료되었습니다! 결과를 확인하세요.")
                 for res in batch_results:
@@ -321,7 +320,11 @@ elif st.session_state['active_tab_index'] == 2:
     if not os.path.isfile(results_file):
         st.info("💡 아직 저장된 학습 기록이 없습니다. 문제를 풀고 채점해 보세요!")
     else:
+        # 기존 results.csv에 대단원 컬럼이 없을 경우를 대비한 방어 코드
         res_df = pd.read_csv(results_file, encoding='utf-8-sig')
+        if '대단원' not in res_df.columns:
+            res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: (df[df['문제 내용'] == x].iloc[0]['대단원'] if not df[df['문제 내용'] == x].empty else '기타', '기타', '기타')))
+
         total = len(res_df)
         avg = res_df['점수'].mean() if total > 0 else 0
         
@@ -334,8 +337,6 @@ elif st.session_state['active_tab_index'] == 2:
         
         # --- 대단원별 취약 챕터 분석 ---
         st.subheader("🚨 파트별 성적 분석 및 취약 파트 공부 추천")
-        
-        res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: find_chapter_info(x, df)))
         
         major_stats = res_df.groupby('대단원').agg(
             평균점수=('점수', 'mean'),
@@ -356,7 +357,7 @@ elif st.session_state['active_tab_index'] == 2:
                 with col_info:
                     st.markdown(f"- 📂 **파트: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
-                    if st.button(f"🎯 집중 공략", key=f"weak_btn_streamlit_fix_{idx}", type="primary"):
+                    if st.button(f"🎯 집중 공략", key=f"weak_btn_fixed_{idx}", type="primary"):
                         st.session_state['target_weak_major'] = major_name
                         st.session_state['scope_mode'] = "🚨 취약 파트 공부"
                         st.session_state['active_tab_index'] = 0  # 1단계 탭으로 강제 이동
