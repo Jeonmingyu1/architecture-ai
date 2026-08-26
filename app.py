@@ -137,7 +137,7 @@ if st.session_state['active_tab_index'] == 0:
     if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
         st.info(f"🚨 현재 **[{st.session_state['target_weak_major']}]** 파트 집중 공략 모드입니다!")
     else:
-        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 상세 피드백과 모범 답안을 확인하는 모드입니다.")
+        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 채점 결과와 모범 답안을 즉시 확인하는 모드입니다.")
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
@@ -181,6 +181,16 @@ if st.session_state['active_tab_index'] == 0:
                     result_text = response.choices[0].message.content
                     score = extract_score(result_text)
 
+                    # 세션에 채점 결과, 모범답안, 해설을 함께 저장하여 즉시 출력되도록 함
+                    st.session_state['last_graded'] = {
+                        "question": selected_q,
+                        "user_ans": user_ans,
+                        "score": score,
+                        "result_text": result_text,
+                        "correct_answer": correct_answer,
+                        "explanation": explanation
+                    }
+
                     st.session_state['messages'] = [
                         {"role": "user", "content": f"문제: {selected_q}\n내 답안: {user_ans}"},
                         {"role": "assistant", "content": result_text}
@@ -195,12 +205,18 @@ if st.session_state['active_tab_index'] == 0:
                         writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
 
-        # 💡 [추가됨] 채점 후 혹은 언제든 모범답안과 해설을 확인할 수 있는 익스팬더
-        with st.expander("📖 모범 답안 및 상세 해설 보기"):
-            st.markdown(f"**[모범 답안]**\n{correct_answer}")
-            st.markdown(f"**[상세 해설]**\n{explanation}")
+        # 💡 [변경됨] 채점 버튼을 누르면 아래에 AI 채점 결과와 함께 모범 답안 및 해설이 바로 나타남
+        if 'last_graded' in st.session_state and st.session_state['last_graded']['question'] == selected_q:
+            lg = st.session_state['last_graded']
+            st.markdown("---")
+            st.markdown("### 📋 채점 결과 및 정답 확인")
+            st.info(f"**점수: {lg['score']}점**")
+            st.markdown(lg['result_text'])
+            
+            st.success(f"**📖 모범 답안**\n\n{lg['correct_answer']}")
+            st.info(f"**💡 상세 해설**\n\n{lg['explanation']}")
+            st.markdown("---")
 
-        st.divider()
         st.markdown("##### 💬 AI에게 이어서 질문하기")
         if 'messages' not in st.session_state:
             st.session_state['messages'] = []
