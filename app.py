@@ -4,9 +4,6 @@ from openai import OpenAI
 import csv
 import os
 import re
-import openpyxl
-from PIL import Image
-import io
 
 # 1. 페이지 설정
 st.set_page_config(page_title="건축기사 AI 학습 시스템", layout="wide")
@@ -18,33 +15,14 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. Excel 데이터 및 직접 삽입된 이미지 불러오기
-excel_file = 'data.xlsx'
-if not os.path.exists(excel_file):
+# 3. Excel 데이터 불러오기
+try:
+    raw_df = pd.read_excel('data.xlsx', engine='openpyxl')
+except FileNotFoundError:
     st.error("⚠️ 'data.xlsx' 파일이 없습니다. 폴더 안에 data.xlsx 파일을 먼저 위치시켜 주세요!")
     st.stop()
 
-# 💡 [핵심] openpyxl을 이용해 엑셀 시트에 직접 삽입된 이미지의 행(Row) 위치 파악
-wb = openpyxl.load_workbook(excel_file, data_only=True)
-ws = wb.active
-
-# 이미지 저장할 임시 폴더 생성
-os.makedirs("temp_images", exist_ok=True)
-image_map = {}  # {행번호: 이미지파일경로}
-
-for img in ws._images:
-    # 이미지가 위치한 시작 셀의 행 번호 (openpyxl의 row는 1부터 시작, pandas는 0부터 시작이므로 주의)
-    cell_row = img.anchor._from.row + 1
-    
-    # 이미지 데이터 추출 및 저장
-    img_data = img._data()
-    img_filename = f"temp_images/img_row_{cell_row}.png"
-    with open(img_filename, "wb") as f:
-        f.write(img_data)
-    image_map[cell_row] = img_filename
-
-# Pandas로 엑셀 데이터 읽기
-raw_df = pd.read_excel(excel_file, engine='openpyxl')
+# 컬럼명 공백 제거
 raw_df.columns = raw_df.columns.str.strip()
 
 def clean_val(val):
@@ -55,17 +33,15 @@ def clean_val(val):
         return ""
     return s
 
-# 데이터 전처리 및 엑셀 행 번호 매칭 (pandas df index 0은 엑셀의 2행에 해당)
+# 💡 [핵심] '문제 내용' 바로 아래 셀에 적힌 이미지 경로 텍스트를 읽어오는 전처리 루프
 processed_rows = []
 i = 0
 while i < len(raw_df):
-    # pandas 인덱스 i는 헤더를 제외하므로 엑셀 실제 행 번호는 i + 2 입니다.
-    excel_row_num = i + 2
-    
     row = raw_df.iloc[i]
     q_text = clean_val(row.get('문제 내용'))
     major = clean_val(row.get('대단원'))
     
+    # 완전히 빈 행은 스킵
     if major == "" and q_text == "":
         i += 1
         continue
@@ -75,21 +51,21 @@ while i < len(raw_df):
     correct = clean_val(row.get('모범 답안'))
     explanation = clean_val(row.get('해설'))
     
-    # 💡 문제 행(excel_row_num) 바로 밑 행(excel_row_num + 1)에 그림이 직접 삽입되어 있는지 확인
     img_path = None
-    target_img_row = excel_row_num + 1
     
-    if target_img_row in image_map:
-        img_path = image_map[target_img_row]
-        # 만약 그림이 들어있는 밑줄 행이 raw_df에도 별도의 빈 행으로 잡혀있다면 건너뛰기 위해 i를 추가로 체크할 수 있습니다.
-        # 사용자가 문제 행 밑에 '셀만 만들고 비워둔 상태'라면 다음 pandas 행이 그림 행일 수 있으므로 확인합니다.
-        if i + 1 < len(raw_df):
-            next_row = raw_df.iloc[i + 1]
-            if clean_val(next_row.get('대단원')) == "" and clean_val(next_row.get('문제 내용')) == "":
-                i += 1  # 빈 행 스킵
-    elif (excel_row_num + 1) in image_map:
-        img_path = image_map[excel_row_num + 1]
-
+    # 바로 다음 행(i + 1)이 존재할 때, '문제 내용' 열 바로 아래 셀에 이미지 경로 텍스트가 있는지 확인
+    if i + 1 < len(raw_df):
+        next_row = raw_df.iloc[i + 1]
+        next_q_text = clean_val(next_row.get('문제 내용'))
+        next_major = clean_val(next_row.get('대단원'))
+        next_middle = clean_val(next_row.get('중단원'))
+        
+        # 조건: 다른 열은 비어있고, '문제 내용' 열 아래에 이미지 확장자나 폴더 경로가 적혀있는 경우
+        if next_major == "" and next_middle == "" and \
+           any(ext in next_q_text.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', 'images/']):
+            img_path = next_q_text
+            i += 1  # 경로 텍스트가 적힌 행은 문제로 인식되지 않도록 건너뜀
+            
     processed_rows.append({
         '대단원': major,
         '중단원': middle,
@@ -205,8 +181,15 @@ st.divider()
 # 🖼️ 이미지 출력 헬퍼 함수
 def render_question_image(row_data):
     img_path = row_data.get('이미지')
-    if img_path and os.path.exists(str(img_path)):
-        st.image(str(img_path), caption="[엑셀 삽입 참고 그림]", use_column_width=True)
+    if img_path and str(img_path).strip() != "":
+        path_str = str(img_path).strip()
+        if os.path.exists(path_str):
+            st.image(path_str, caption="[문제 참고 그림]", use_column_width=True)
+        else:
+            try:
+                st.image(path_str, caption="[문제 참고 그림]", use_column_width=True)
+            except Exception:
+                pass
 
 # ==================== [탭 1: 한 문제씩 풀기 + 이어서 질문하기] ====================
 if st.session_state['active_tab_index'] == 0:
