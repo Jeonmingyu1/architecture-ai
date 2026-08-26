@@ -15,83 +15,37 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. Excel 데이터 불러오기
+# 3. CSV 데이터 불러오기 및 4대 과목 자동 재분류 적용
 try:
-    raw_df = pd.read_excel('data.xlsx', engine='openpyxl')
+    try:
+        df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
+    except UnicodeDecodeError:
+        df = pd.read_csv('data.csv', encoding='cp949', engine='python', on_bad_lines='skip')
 except FileNotFoundError:
-    st.error("⚠️ 'data.xlsx' 파일이 없습니다. 폴더 안에 data.xlsx 파일을 먼저 위치시켜 주세요!")
+    st.error("⚠️ 'data.csv' 파일이 없습니다. 폴더 안에 data.csv 파일을 먼저 위치시켜 주세요!")
     st.stop()
 
-# 컬럼명 공백 제거
-raw_df.columns = raw_df.columns.str.strip()
+# 데이터 전처리 및 새로운 4대 대단원('건축시공', '공정관리', '건축적산', '건축구조') 매핑 함수
+df['대단원'] = df['대단원'].astype(str).str.strip()
+df['중단원'] = df['중단원'].astype(str).str.strip()
+df['문제 내용'] = df['문제 내용'].astype(str).str.strip()
 
-def clean_val(val):
-    if pd.isna(val):
-        return ""
-    s = str(val).strip()
-    if s.lower() == 'nan':
-        return ""
-    return s
-
-# 💡 [핵심] '문제 내용' 바로 아래 셀에 적힌 이미지 경로 텍스트를 읽어오는 전처리 루프
-processed_rows = []
-i = 0
-while i < len(raw_df):
-    row = raw_df.iloc[i]
-    q_text = clean_val(row.get('문제 내용'))
-    major = clean_val(row.get('대단원'))
-    
-    # 완전히 빈 행은 스킵
-    if major == "" and q_text == "":
-        i += 1
-        continue
-        
-    middle = clean_val(row.get('중단원'))
-    year = clean_val(row.get('년도'))
-    correct = clean_val(row.get('모범 답안'))
-    explanation = clean_val(row.get('해설'))
-    
-    img_path = None
-    
-    # 바로 다음 행(i + 1)이 존재할 때, '문제 내용' 열 바로 아래 셀에 이미지 경로 텍스트가 있는지 확인
-    if i + 1 < len(raw_df):
-        next_row = raw_df.iloc[i + 1]
-        next_q_text = clean_val(next_row.get('문제 내용'))
-        next_major = clean_val(next_row.get('대단원'))
-        next_middle = clean_val(next_row.get('중단원'))
-        
-        # 조건: 다른 열은 비어있고, '문제 내용' 열 아래에 이미지 확장자나 폴더 경로가 적혀있는 경우
-        if next_major == "" and next_middle == "" and \
-           any(ext in next_q_text.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', 'images/']):
-            img_path = next_q_text
-            i += 1  # 경로 텍스트가 적힌 행은 문제로 인식되지 않도록 건너뜀
-            
-    processed_rows.append({
-        '대단원': major,
-        '중단원': middle,
-        '년도': year,
-        '문제 내용': q_text,
-        '모범 답안': correct,
-        '해설': explanation,
-        '이미지': img_path
-    })
-    i += 1
-
-df = pd.DataFrame(processed_rows)
-
-# 4대 대단원 자동 재분류 적용
 def reclassify_app_units(row):
     text = str(row['문제 내용'])
     old_major = str(row['대단원'])
     old_middle = str(row['중단원'])
     combined = old_major + " " + old_middle + " " + text
     
+    # 1) 공정관리
     if any(k in combined for k in ['공정', '네트워크', 'CPM', '공정표', 'VE', '가치공학', '선행작업', '후행작업']):
         return '공정관리'
+    # 2) 건축적산
     elif any(k in combined for k in ['적산', '견적', '수량', '단가', '공사비', '물량산출']):
         return '건축적산'
+    # 3) 건축구조
     elif any(k in combined for k in ['구조역학', '모멘트', '단면2차', '응력', '보의', '하중', '처짐', '철근콘크리트 구조', '철골구조', '내진', '휨모멘트']):
         return '건축구조'
+    # 4) 건축시공 (나머지 전체)
     else:
         return '건축시공'
 
@@ -114,7 +68,7 @@ if 'scope_mode' not in st.session_state:
 if 'target_weak_major' not in st.session_state:
     st.session_state['target_weak_major'] = None
 if 'selected_major_val' not in st.session_state:
-    major_unique = df['대단원'].unique().tolist() if not df.empty else []
+    major_unique = df['대단원'].unique().tolist()
     st.session_state['selected_major_val'] = major_unique[0] if major_unique else ""
 if 'active_tab_index' not in st.session_state:
     st.session_state['active_tab_index'] = 0
@@ -178,19 +132,6 @@ with col_t3:
 
 st.divider()
 
-# 🖼️ 이미지 출력 헬퍼 함수 (적당한 크기 width=500 적용)
-def render_question_image(row_data):
-    img_path = row_data.get('이미지')
-    if img_path and str(img_path).strip() != "":
-        path_str = str(img_path).strip()
-        if os.path.exists(path_str):
-            st.image(path_str, caption="[문제 참고 그림]", width=500)
-        else:
-            try:
-                st.image(path_str, caption="[문제 참고 그림]", width=500)
-            except Exception:
-                pass
-
 # ==================== [탭 1: 한 문제씩 풀기 + 이어서 질문하기] ====================
 if st.session_state['active_tab_index'] == 0:
     if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
@@ -212,10 +153,6 @@ if st.session_state['active_tab_index'] == 0:
         q_sub = row_data['중단원']
 
         st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {q_major}  |  중단원: {q_sub}**\n\n{selected_q}")
-        
-        # 그림 출력
-        render_question_image(row_data)
-
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
         if st.button("🤖 AI 채점 요청하기", type="primary"):
@@ -223,6 +160,7 @@ if st.session_state['active_tab_index'] == 0:
                 st.warning("답안을 입력해주세요!")
             else:
                 with st.spinner("AI 채점 중..."):
+                    # 💡 LaTeX 수식 오출력 방지를 위한 지시사항 추가
                     prompt = f"""
                     너는 건축기사 실기 수석 채점관이야.
                     [출제 연도]: {question_year}
@@ -230,6 +168,8 @@ if st.session_state['active_tab_index'] == 0:
                     [모범 답안]: {correct_answer}
                     [상세 해설]: {explanation}
                     [학생 답안]: {user_ans}
+                    
+                    * 주의: 답안이나 해설, 피드백을 작성할 때 \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기는 일반 기호(x 또는 *)를 쓰고, 단위는 m^3, 매 등 일반 텍스트 형태로만 작성해 주세요.
                     
                     핵심 키워드 포함 여부를 엄격히 평가해 0~100점의 점수를 매기고 피드백해줘.
                     반드시 아래 형식으로 출력할 것:
@@ -296,7 +236,7 @@ if st.session_state['active_tab_index'] == 0:
                     chat_history = [
                         {
                             "role": "system", 
-                            "content": f"너는 건축기사 수석 강사야. 현재 풀고 있는 문제는 '{selected_q}' (출제연도: {question_year})이고 모범 답안은 '{correct_answer}', 해설은 '{explanation}'이야. 학생의 추가 질문에 친절하고 전문적으로 답해줘."
+                            "content": f"너는 건축기사 수석 강사야. 현재 풀고 있는 문제는 '{selected_q}' (출제연도: {question_year})이고 모범 답안은 '{correct_answer}', 해설은 '{explanation}'이야. 수식을 쓸 때 \\times나 \\text 같은 LaTeX 문법은 절대 쓰지 말고 일반 텍스트 기호만 사용해 줘. 학생의 추가 질문에 친절하고 전문적으로 답해줘."
                         }
                     ] + st.session_state['messages']
 
@@ -335,10 +275,6 @@ elif st.session_state['active_tab_index'] == 1:
         for idx, row in exam_df.iterrows():
             q_year = row.get('년도', '정보 없음')
             st.markdown(f"**Q{idx+1}. [{q_year} | {row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
-            
-            # 그림 출력
-            render_question_image(row)
-
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
             user_answers_dict[idx] = {
                 "question": row['문제 내용'],
@@ -366,6 +302,8 @@ elif st.session_state['active_tab_index'] == 1:
                     [문제]: {data['question']}
                     [모범 답안]: {data['correct']}
                     [학생 답안]: {data['user_ans']}
+                    
+                    * 주의: \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기는 일반 기호(x 또는 *)를 쓰고 단위는 m^3 등 일반 텍스트로만 쓰세요.
                     
                     핵심 키워드가 포함되었는지 엄격하게 평가하여 0~100점의 점수를 부여하고 피드백을 줘.
                     반드시 아래 형식으로 출력할 것:
@@ -463,7 +401,7 @@ elif st.session_state['active_tab_index'] == 2:
         
         st.divider()
         st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_column_width=True)
+        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
         
         if st.button("🗑️ 학습 기록 전체 초기화"):
             if os.path.isfile(results_file):
