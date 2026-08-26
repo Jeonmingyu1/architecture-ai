@@ -15,14 +15,11 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# 3. CSV 데이터 불러오기 및 4대 과목 자동 재분류 적용
+# 3. 엑셀(data.xlsx) 데이터 불러오기 및 4대 과목 자동 재분류 적용
 try:
-    try:
-        df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
-    except UnicodeDecodeError:
-        df = pd.read_csv('data.csv', encoding='cp949', engine='python', on_bad_lines='skip')
+    df = pd.read_excel('data.xlsx', engine='openpyxl')
 except FileNotFoundError:
-    st.error("⚠️ 'data.csv' 파일이 없습니다. 폴더 안에 data.csv 파일을 먼저 위치시켜 주세요!")
+    st.error("⚠️ 'data.xlsx' 파일이 없습니다. 폴더 안에 data.xlsx 파일을 먼저 위치시켜 주세요!")
     st.stop()
 
 # 데이터 전처리 및 새로운 4대 대단원('건축시공', '공정관리', '건축적산', '건축구조') 매핑 함수
@@ -160,7 +157,6 @@ if st.session_state['active_tab_index'] == 0:
                 st.warning("답안을 입력해주세요!")
             else:
                 with st.spinner("AI 채점 중..."):
-                    # 💡 LaTeX 수식 오출력 방지를 위한 지시사항 추가
                     prompt = f"""
                     너는 건축기사 실기 수석 채점관이야.
                     [출제 연도]: {question_year}
