@@ -178,16 +178,16 @@ with col_t3:
 
 st.divider()
 
-# 🖼️ 이미지 출력 헬퍼 함수 (최신 Streamlit 규격 반영)
+# 🖼️ 이미지 출력 헬퍼 함수 (적당한 크기 width=500 적용)
 def render_question_image(row_data):
     img_path = row_data.get('이미지')
     if img_path and str(img_path).strip() != "":
         path_str = str(img_path).strip()
         if os.path.exists(path_str):
-            st.image(path_str, caption="[문제 참고 그림]", width="stretch")
+            st.image(path_str, caption="[문제 참고 그림]", width=500)
         else:
             try:
-                st.image(path_str, caption="[문제 참고 그림]", width="stretch")
+                st.image(path_str, caption="[문제 참고 그림]", width=500)
             except Exception:
                 pass
 
