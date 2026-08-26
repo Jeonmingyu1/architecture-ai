@@ -4,6 +4,9 @@ from openai import OpenAI
 import csv
 import os
 import re
+import openpyxl
+from io import BytesIO
+from PIL import Image as PILImage
 
 # 1. 페이지 설정
 st.set_page_config(page_title="건축기사 AI 학습 시스템", layout="wide")
@@ -12,18 +15,50 @@ st.title("🏗️ 건축기사 AI 학습 & 채점 시스템")
 # 2. Gemini API 키 설정
 client = OpenAI(
     api_key=st.secrets["GEMINI_API_KEY"],
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+    base_url="https://googleapis.com"
 )
 
-# 3. CSV 데이터 불러오기 및 4대 과목 자동 재분류 적용
-try:
+# 3. 엑셀 데이터 및 이미지 추출 캐싱 함수
+@st.cache_data
+def load_excel_with_images(file_path):
     try:
-        df = pd.read_csv('data.csv', encoding='utf-8-sig', engine='python', on_bad_lines='skip')
-    except UnicodeDecodeError:
-        df = pd.read_csv('data.csv', encoding='cp949', engine='python', on_bad_lines='skip')
-except FileNotFoundError:
-    st.error("⚠️ 'data.csv' 파일이 없습니다. 폴더 안에 data.csv 파일을 먼저 위치시켜 주세요!")
-    st.stop()
+        # openpyxl로 워크북 로드
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        ws = wb.active
+        
+        # 1) 데이터프레임으로 기본 텍스트 데이터 변환 (첫 행을 컬럼명으로 사용)
+        data = ws.values
+        cols = next(data)
+        data = list(data)
+        df_excel = pd.DataFrame(data, columns=cols)
+        
+        # 컬럼 공백 제거 및 인덱스 초기화
+        df_excel.columns = [str(c).strip() for c in df_excel.columns]
+        df_excel = df_excel.dropna(subset=['문제 내용']).reset_index(drop=True)
+        
+        # 2) 엑셀 내 이미지 추출 및 행 번호와 매핑
+        # 행 번호(0부터 시작하는 index)별 바이너리 이미지 데이터를 담을 딕셔너리
+        image_dict = {}
+        
+        if hasattr(ws, '_images'):
+            for img in ws._images:
+                try:
+                    # 엑셀 상의 행/열 인덱스 (0부터 시작)
+                    row_idx = img.anchor._from.row - 1 # 헤더 열(1행) 제외하고 df의 index와 맞추기 위함
+                    
+                    # 이미지 바이트 추출
+                    img_bytes = img._data()
+                    image_dict[row_idx] = img_bytes
+                except Exception:
+                    continue
+                    
+        return df_excel, image_dict
+    except FileNotFoundError:
+        st.error(f"⚠️ '{file_path}' 파일이 없습니다. 폴더 안에 파일을 먼저 위치시켜 주세요!")
+        st.stop()
+
+# 엑셀 파일 로드 실행
+df, excel_images = load_excel_with_images('data.xlsx')
 
 # 데이터 전처리 및 새로운 4대 대단원('건축시공', '공정관리', '건축적산', '건축구조') 매핑 함수
 df['대단원'] = df['대단원'].astype(str).str.strip()
@@ -50,6 +85,9 @@ def reclassify_app_units(row):
         return '건축시공'
 
 df['대단원'] = df.apply(reclassify_app_units, axis=1)
+
+# 추출 후 기존 데이터프레임의 인덱스를 보존하기 위한 처리
+df = df.reset_index() # 원래 추출된 순서(행 위치)를 'index' 컬럼으로 보존
 
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
@@ -151,8 +189,19 @@ if st.session_state['active_tab_index'] == 0:
         question_year = row_data.get('년도', '정보 없음')
         q_major = row_data['대단원']
         q_sub = row_data['중단원']
+        original_row_idx = row_data['index'] # 💡 원래 엑셀의 행 위치 가져오기
 
         st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {q_major}  |  중단원: {q_sub}**\n\n{selected_q}")
+        
+        # 💡 [추가] 해당 문제 행에 매칭된 엑셀 내 그림이 존재한다면 문제 밑에 자동 출력
+        if original_row_idx in excel_images:
+            try:
+                img_data = excel_images[original_row_idx]
+                image = PILImage.open(BytesIO(img_data))
+                st.image(image, caption="[문제 참고 그림]", width=450)
+            except Exception as e:
+                st.caption("⚠️ 엑셀 내 이미지를 불러오는 과정에서 오류가 발생했습니다.")
+
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
         if st.button("🤖 AI 채점 요청하기", type="primary"):
@@ -181,7 +230,6 @@ if st.session_state['active_tab_index'] == 0:
                     result_text = response.choices[0].message.content
                     score = extract_score(result_text)
 
-                    # 세션에 채점 결과, 모범답안, 해설을 함께 저장하여 즉시 출력되도록 함
                     st.session_state['last_graded'] = {
                         "question": selected_q,
                         "user_ans": user_ans,
@@ -205,202 +253,3 @@ if st.session_state['active_tab_index'] == 0:
                         writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
 
-        # 💡 [변경됨] 채점 버튼을 누르면 아래에 AI 채점 결과와 함께 모범 답안 및 해설이 바로 나타남
-        if 'last_graded' in st.session_state and st.session_state['last_graded']['question'] == selected_q:
-            lg = st.session_state['last_graded']
-            st.markdown("---")
-            st.markdown("### 📋 채점 결과 및 정답 확인")
-            st.info(f"**점수: {lg['score']}점**")
-            st.markdown(lg['result_text'])
-            
-            st.success(f"**📖 모범 답안**\n\n{lg['correct_answer']}")
-            st.info(f"**💡 상세 해설**\n\n{lg['explanation']}")
-            st.markdown("---")
-
-        st.markdown("##### 💬 AI에게 이어서 질문하기")
-        if 'messages' not in st.session_state:
-            st.session_state['messages'] = []
-
-        for message in st.session_state['messages']:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-        if chat_input := st.chat_input("예: 이 개념이 실기 시험에 또 어떻게 응용돼서 나와?"):
-            st.session_state['messages'].append({"role": "user", "content": chat_input})
-            with st.chat_message("user"):
-                st.markdown(chat_input)
-
-            with st.chat_message("assistant"):
-                with st.spinner("답변 생성 중..."):
-                    chat_history = [
-                        {
-                            "role": "system", 
-                            "content": f"너는 건축기사 수석 강사야. 현재 풀고 있는 문제는 '{selected_q}' (출제연도: {question_year})이고 모범 답안은 '{correct_answer}', 해설은 '{explanation}'이야. 학생의 추가 질문에 친절하고 전문적으로 답해줘."
-                        }
-                    ] + st.session_state['messages']
-
-                    chat_response = client.chat.completions.create(
-                        model="gemini-3.6-flash",
-                        messages=chat_history
-                    )
-                    answer_text = chat_response.choices[0].message.content
-                    st.markdown(answer_text)
-                    st.session_state['messages'].append({"role": "assistant", "content": answer_text})
-
-# ==================== [탭 2: 시험지 모드] ====================
-elif st.session_state['active_tab_index'] == 1:
-    st.markdown("#### 📑 여러 문제를 시험지처럼 지정한 문항 수만큼 뽑아서 한 번에 풀고 채점하는 모드입니다.")
-    
-    if target_df.empty:
-        st.warning("⚠️ 선택된 범위에 문제가 없습니다.")
-    else:
-        c_cnt, c_action = st.columns([2, 2])
-        with c_cnt:
-            max_limit = len(target_df)
-            num_q = st.number_input("추출 문항 수 설정", min_value=1, max_value=max(1, max_limit), value=min(5, max_limit), key="batch_num_q")
-        with c_action:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🎲 새로운 문제 세트 무작위 뽑기", use_container_width=True, type="secondary"):
-                st.session_state['batch_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
-                st.rerun()
-
-        if 'batch_exam_df' not in st.session_state or len(st.session_state['batch_exam_df']) != num_q:
-            st.session_state['batch_exam_df'] = target_df.sample(n=num_q).reset_index(drop=True)
-
-        exam_df = st.session_state['batch_exam_df']
-        st.divider()
-
-        user_answers_dict = {}
-        for idx, row in exam_df.iterrows():
-            q_year = row.get('년도', '정보 없음')
-            st.markdown(f"**Q{idx+1}. [{q_year} | {row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
-            ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
-            user_answers_dict[idx] = {
-                "question": row['문제 내용'],
-                "major": row['대단원'],
-                "sub": row['중단원'],
-                "year": q_year,
-                "correct": row['모범 답안'],
-                "explanation": row['해설'],
-                "user_ans": ans
-            }
-            st.markdown("---")
-
-        if st.button("📝 전체 답안 일괄 채점 및 저장하기", type="primary", use_container_width=True):
-            with st.spinner("🤖 AI가 전체 답안을 채점 중입니다..."):
-                file_name = 'results.csv'
-                file_exists = os.path.isfile(file_name)
-                batch_results = []
-
-                for idx, data in user_answers_dict.items():
-                    if not data["user_ans"]:
-                        continue
-                    
-                    prompt = f"""
-                    너는 건축기사 실기 수석 채점관이야.
-                    [문제]: {data['question']}
-                    [모범 답안]: {data['correct']}
-                    [학생 답안]: {data['user_ans']}
-                    
-                    핵심 키워드가 포함되었는지 엄격하게 평가하여 0~100점의 점수를 부여하고 피드백을 줘.
-                    반드시 아래 형식으로 출력할 것:
-                    1. 최종 점수: XX점
-                    2. 피드백: (간단한 평가 및 누락된 키워드)
-                    """
-                    
-                    try:
-                        response = client.chat.completions.create(
-                            model="gemini-3.6-flash",
-                            messages=[{"role": "user", "content": prompt}]
-                        )
-                        res_text = response.choices[0].message.content
-                        score = extract_score(res_text)
-                    except Exception as e:
-                        res_text = f"채점 오류: {str(e)}"
-                        score = 0
-                        
-                    batch_results.append({
-                        "question": data['question'], 
-                        "user_ans": data['user_ans'], 
-                        "score": score, 
-                        "result": res_text,
-                        "correct": data['correct'],
-                        "explanation": data['explanation']
-                    })
-                    
-                    with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
-                        writer = csv.writer(f)
-                        if not file_exists:
-                            writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
-                            file_exists = True
-                        writer.writerow([data['question'], data['major'], data['sub'], data['year'], data['user_ans'], score, res_text.replace('\n', ' ')])
-
-                st.success("🎉 일괄 채점이 완료되었습니다!")
-                for res in batch_results:
-                    with st.expander(f"📌 [점수: {res['score']}점] {res['question'][:35]}..."):
-                        st.markdown(f"**내 답안:** {res['user_ans']}")
-                        st.markdown(f"**AI 채점 결과:**\n{res['result']}")
-                        st.markdown("---")
-                        st.markdown(f"**[모범 답안]**\n{res['correct']}")
-                        st.markdown(f"**[상세 해설]**\n{res['explanation']}")
-
-# ==================== [탭 3: 학습 분석 & 오답노트] ====================
-elif st.session_state['active_tab_index'] == 2:
-    st.header("📈 나의 학습 성적표 및 취약 챕터 분석")
-    results_file = 'results.csv'
-    
-    if not os.path.isfile(results_file):
-        st.info("💡 아직 저장된 학습 기록이 없습니다. 문제를 풀고 채점해 보세요!")
-    else:
-        res_df = pd.read_csv(results_file, encoding='utf-8-sig')
-        if '대단원' not in res_df.columns:
-            res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: (df[df['문제 내용'] == x].iloc[0]['대단원'] if not df[df['문제 내용'] == x].empty else '건축시공', '기타', '기타')))
-        else:
-            res_df['대단원'] = res_df['대단원'].apply(lambda m: m if m in ['건축시공', '공정관리', '건축적산', '건축구조'] else '건축시공')
-
-        total = len(res_df)
-        avg = res_df['점수'].mean() if total > 0 else 0
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("총 풀이 문항", f"{total}개")
-        c2.metric("평균 점수", f"{avg:.1f}점")
-        c3.metric("학습 상태", "🎯 합격권" if avg >= 60 else "⚠️ 보완 필요")
-        
-        st.divider()
-        
-        st.subheader("🚨 파트별 성적 분석 및 취약 파트 공부 추천")
-        major_stats = res_df.groupby('대단원').agg(
-            평균점수=('점수', 'mean'),
-            풀이횟수=('점수', 'count')
-        ).reset_index()
-        
-        weak_majors = major_stats.sort_values(by='평균점수', ascending=True)
-        
-        if not weak_majors.empty:
-            st.markdown("👇 점수가 낮게 나온 파트의 **[🎯 집중 공략]** 버튼을 누르면, 곧바로 해당 파트의 문제만 풀 수 있도록 1단계 화면으로 이동합니다!")
-            
-            for idx, row in weak_majors.head(5).iterrows():
-                major_name = row['대단원']
-                avg_s = row['평균점수']
-                count = row['풀이횟수']
-                
-                col_info, col_btn = st.columns([3, 1])
-                with col_info:
-                    st.markdown(f"- 📂 **파트: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
-                with col_btn:
-                    if st.button(f"🎯 집중 공략", key=f"fixed_focus_btn_{idx}", type="primary"):
-                        st.session_state['target_weak_major'] = major_name
-                        st.session_state['scope_mode'] = "🚨 취약 파트 공부"
-                        st.session_state['active_tab_index'] = 0 
-                        if 'batch_exam_df' in st.session_state:
-                            del st.session_state['batch_exam_df']
-                        st.rerun()
-        
-        st.divider()
-        st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
-        
-        if st.button("🗑️ 학습 기록 전체 초기화"):
-            if os.path.isfile(results_file):
-                os.remove(results_file)
-                st.rerun()
