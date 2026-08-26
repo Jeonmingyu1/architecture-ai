@@ -231,7 +231,7 @@ if st.session_state['active_tab_index'] == 0:
                     [상세 해설]: {explanation}
                     [학생 답안]: {user_ans}
                     
-                    * 주의: 피드백이나 해설을 작성할 때 \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기 기호는 x 또는 *를 쓰고, 단위는 m^3, 매 등 일반 텍스트 형태로만 작성해 주세요.
+                    * 주의: 피드백이나 해설을 작성할 때 \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기 기호는 x 또는 *를 쓰고, 단위는 m^3 등 일반 텍스트 형태로만 작성해 주세요.
                     
                     핵심 키워드 포함 여부를 엄격히 평가해 0~100점의 점수를 매기고 피드백해줘.
                     반드시 아래 형식으로 출력할 것:
@@ -255,10 +255,8 @@ if st.session_state['active_tab_index'] == 0:
                         "explanation": explanation
                     }
 
-                    st.session_state['messages'] = [
-                        {"role": "user", "content": f"문제: {selected_q}\n내 답안: {user_ans}"},
-                        {"role": "assistant", "content": result_text}
-                    ]
+                    # 이어서 질문하기(채팅창) 내역 초기화 (첫 질문/채점 결과는 채팅창에 중복 출력하지 않고 아래 답변 영역에만 집중)
+                    st.session_state['messages'] = []
 
                     file_name = 'results.csv'
                     file_exists = os.path.isfile(file_name)
@@ -467,7 +465,7 @@ elif st.session_state['active_tab_index'] == 2:
         
         st.divider()
         st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
+        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_column_width=True)
         
         if st.button("🗑️ 학습 기록 전체 초기화"):
             if os.path.isfile(results_file):
