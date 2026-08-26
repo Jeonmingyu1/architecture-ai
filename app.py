@@ -255,7 +255,6 @@ if st.session_state['active_tab_index'] == 0:
                         "explanation": explanation
                     }
 
-                    # 이어서 질문하기(채팅창) 내역 초기화 (첫 질문/채점 결과는 채팅창에 중복 출력하지 않고 아래 답변 영역에만 집중)
                     st.session_state['messages'] = []
 
                     file_name = 'results.csv'
@@ -465,7 +464,7 @@ elif st.session_state['active_tab_index'] == 2:
         
         st.divider()
         st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_column_width=True)
+        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_container_width=True)
         
         if st.button("🗑️ 학습 기록 전체 초기화"):
             if os.path.isfile(results_file):
