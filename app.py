@@ -25,38 +25,46 @@ except FileNotFoundError:
 # 컬럼명 공백 제거
 raw_df.columns = raw_df.columns.str.strip()
 
-# 💡 [핵심] 위아래로 나뉜 행 구조를 하나의 문제 딕셔너리로 병합하는 전처리 로직
+def clean_val(val):
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.lower() == 'nan':
+        return ""
+    return s
+
+# 💡 [핵심] '문제 내용' 열의 밑에 있는 셀에 그림이 들어오는 구조를 반영한 전처리 루프
 processed_rows = []
 i = 0
 while i < len(raw_df):
     row = raw_df.iloc[i]
-    q_text = str(row.get('문제 내용', '')).strip()
+    q_text = clean_val(row.get('문제 내용'))
+    major = clean_val(row.get('대단원'))
     
-    # 빈 행이거나 유효하지 않은 행은 스킵
-    if pd.isna(row.get('대단원')) and q_text == "":
+    # 완전히 빈 행은 스킵
+    if major == "" and q_text == "":
         i += 1
         continue
         
-    # 기본 문제 정보 추출
-    major = str(row.get('대단원', '건축시공')).strip()
-    middle = str(row.get('중단원', '')).strip()
-    year = str(row.get('년도', '')).strip()
-    correct = str(row.get('모범 답안', '')).strip()
-    explanation = str(row.get('해설', '')).strip()
+    middle = clean_val(row.get('중단원'))
+    year = clean_val(row.get('년도'))
+    correct = clean_val(row.get('모범 답안'))
+    explanation = clean_val(row.get('해설'))
     
     img_path = None
     
-    # 바로 다음 행(i + 1)이 존재하고, 대단원/년도 등이 비어있으면서 '문제 내용' 열에 이미지 경로/확장자가 적혀있는지 확인
+    # 바로 다음 행(i + 1)이 존재할 때, '문제 내용' 열 바로 아래 셀에 이미지가 있는지 확인
     if i + 1 < len(raw_df):
         next_row = raw_df.iloc[i + 1]
-        next_q_text = str(next_row.get('문제 내용', '')).strip()
-        next_major = str(next_row.get('대단원', '')).strip()
+        next_q_text = clean_val(next_row.get('문제 내용'))
+        next_major = clean_val(next_row.get('대단원'))
+        next_middle = clean_val(next_row.get('중단원'))
         
-        # 다음 행이 이미지 경로 형태이거나 (예: .png, .jpg, images/ 등 포함) 대단원 등이 비어있는 경우
-        if (pd.isna(next_row.get('대단원')) or next_major == "" or next_major == "nan") and \
-           (any(ext in next_q_text.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', 'images/'])):
+        # 조건: 대단원/중단원 등 다른 열은 비어있고, 오직 '문제 내용' 열의 밑에만 파일 확장자나 경로가 적혀있는 경우
+        if next_major == "" and next_middle == "" and \
+           any(ext in next_q_text.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', 'images/']):
             img_path = next_q_text
-            i += 1  # 다음 행은 이미지 정보로 소모했으므로 인덱스를 하나 더 건너뜁니다.
+            i += 1  # 이미지 행을 소모했으므로 인덱스 추가 증가
             
     processed_rows.append({
         '대단원': major,
@@ -173,7 +181,7 @@ st.divider()
 # 🖼️ 이미지 출력 헬퍼 함수
 def render_question_image(row_data):
     img_path = row_data.get('이미지')
-    if pd.notna(img_path) and str(img_path).strip() != "":
+    if img_path and str(img_path).strip() != "":
         path_str = str(img_path).strip()
         if os.path.exists(path_str):
             st.image(path_str, caption="[문제 참고 그림]", use_column_width=True)
@@ -205,7 +213,7 @@ if st.session_state['active_tab_index'] == 0:
 
         st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {q_major}  |  중단원: {q_sub}**\n\n{selected_q}")
         
-        # 문제 바로 아래 행에 있던 그림 출력
+        # 그림 출력
         render_question_image(row_data)
 
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
@@ -328,7 +336,7 @@ elif st.session_state['active_tab_index'] == 1:
             q_year = row.get('년도', '정보 없음')
             st.markdown(f"**Q{idx+1}. [{q_year} | {row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
             
-            # 시험지 모드에서도 그림 출력
+            # 그림 출력
             render_question_image(row)
 
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
@@ -455,7 +463,7 @@ elif st.session_state['active_tab_index'] == 2:
         
         st.divider()
         st.subheader("📋 전체 학습 기록 데이터")
-        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과']], use_column_width=True)
+        st.dataframe(res_df[['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채Test결과' if 'AI채Test결과' in res_df.columns else 'AI채점결과']], use_column_width=True)
         
         if st.button("🗑️ 학습 기록 전체 초기화"):
             if os.path.isfile(results_file):
