@@ -49,7 +49,6 @@ def reclassify_app_units(row):
     else:
         return '건축시공'
 
-# 앱 내부에서 대단원 컬럼을 확정된 4가지로 통일
 df['대단원'] = df.apply(reclassify_app_units, axis=1)
 
 def extract_score(result_text):
@@ -138,7 +137,7 @@ if st.session_state['active_tab_index'] == 0:
     if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
         st.info(f"🚨 현재 **[{st.session_state['target_weak_major']}]** 파트 집중 공략 모드입니다!")
     else:
-        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 상세 피드백과 추가 질문을 주고받는 모드입니다.")
+        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 상세 피드백과 모범 답안을 확인하는 모드입니다.")
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
@@ -195,6 +194,11 @@ if st.session_state['active_tab_index'] == 0:
                             writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
                         writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
+
+        # 💡 [추가됨] 채점 후 혹은 언제든 모범답안과 해설을 확인할 수 있는 익스팬더
+        with st.expander("📖 모범 답안 및 상세 해설 보기"):
+            st.markdown(f"**[모범 답안]**\n{correct_answer}")
+            st.markdown(f"**[상세 해설]**\n{explanation}")
 
         st.divider()
         st.markdown("##### 💬 AI에게 이어서 질문하기")
@@ -299,7 +303,14 @@ elif st.session_state['active_tab_index'] == 1:
                         res_text = f"채점 오류: {str(e)}"
                         score = 0
                         
-                    batch_results.append({"question": data['question'], "user_ans": data['user_ans'], "score": score, "result": res_text})
+                    batch_results.append({
+                        "question": data['question'], 
+                        "user_ans": data['user_ans'], 
+                        "score": score, 
+                        "result": res_text,
+                        "correct": data['correct'],
+                        "explanation": data['explanation']
+                    })
                     
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                         writer = csv.writer(f)
@@ -313,6 +324,9 @@ elif st.session_state['active_tab_index'] == 1:
                     with st.expander(f"📌 [점수: {res['score']}점] {res['question'][:35]}..."):
                         st.markdown(f"**내 답안:** {res['user_ans']}")
                         st.markdown(f"**AI 채점 결과:**\n{res['result']}")
+                        st.markdown("---")
+                        st.markdown(f"**[모범 답안]**\n{res['correct']}")
+                        st.markdown(f"**[상세 해설]**\n{res['explanation']}")
 
 # ==================== [탭 3: 학습 분석 & 오답노트] ====================
 elif st.session_state['active_tab_index'] == 2:
@@ -326,7 +340,6 @@ elif st.session_state['active_tab_index'] == 2:
         if '대단원' not in res_df.columns:
             res_df['대단원'], res_df['중단원'], res_df['년도'] = zip(*res_df['선택한문제'].apply(lambda x: (df[df['문제 내용'] == x].iloc[0]['대단원'] if not df[df['문제 내용'] == x].empty else '건축시공', '기타', '기타')))
         else:
-            # 기존 results.csv에 저장된 대단원명도 새 기준으로 동기화
             res_df['대단원'] = res_df['대단원'].apply(lambda m: m if m in ['건축시공', '공정관리', '건축적산', '건축구조'] else '건축시공')
 
         total = len(res_df)
