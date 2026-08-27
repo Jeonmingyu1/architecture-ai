@@ -1,5 +1,6 @@
-openpyxl
-Pillow
-pandas
-openai
 streamlit
+pandas
+openpyxl
+openai
+sentence-transformers
+torch
