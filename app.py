@@ -5,15 +5,27 @@ import csv
 import os
 import re
 
+# [추가] 딥러닝 의미 유사도 채점을 위한 SBERT 라이브러리 임포트
+from sentence_transformers import SentenceTransformer, util
+
 # 1. 페이지 설정
 st.set_page_config(page_title="건축기사 AI 학습 시스템", layout="wide")
-st.title("🏗️ 건축기사 AI 학습 & 채점 시스템")
+st.title("🏗️ 건축기사 AI 학습 & 채점 시스템 (딥러닝 + LLM 하이브리드)")
 
 # 2. Gemini API 키 설정
 client = OpenAI(
     api_key=st.secrets["GEMINI_API_KEY"],
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
+
+# [추가] 앱 실행 시 딥러닝 모델을 딱 한 번만 로드하여 메모리에 캐싱 (속도 최적화)
+@st.cache_resource
+def load_deep_learning_model():
+    # 한국어 문장 의미를 가장 잘 이해하는 경량 SBERT 딥러닝 모델 로드
+    return SentenceTransformer('jhgan/ko-sbert-nli')
+
+with st.spinner("🤖 딥러닝 채점 모델(Ko-SBERT)을 불러오는 중입니다..."):
+    sbert_model = load_deep_learning_model()
 
 # 3. Excel 데이터 불러오기
 try:
@@ -97,6 +109,21 @@ def reclassify_app_units(row):
 
 df['대단원'] = df.apply(reclassify_app_units, axis=1)
 
+# [핵심 딥러닝 함수] SBERT를 이용한 수학적 의미 유사도 점수 산출
+def calculate_deep_learning_score(student_ans, correct_ans):
+    if not student_ans or not correct_ans:
+        return 0
+    # 1. 문장을 딥러닝 모델에 통과시켜 고차원 벡터(임베딩)로 변환
+    emb_student = sbert_model.encode(student_ans, convert_to_tensor=True)
+    emb_correct = sbert_model.encode(correct_ans, convert_to_tensor=True)
+    
+    # 2. 코사인 유사도 연산 (0 ~ 1 사이의 값)
+    similarity = util.cos_sim(emb_student, emb_correct)
+    score = round(similarity.item() * 100, 1)
+    
+    # 점수가 0~100 사이를 벗어나지 않도록 보정
+    return max(0, min(100, int(score)))
+
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
     if match:
@@ -178,7 +205,7 @@ with col_t3:
 
 st.divider()
 
-# 🖼️ 이미지 출력 헬퍼 함수 (적당한 크기 width=500 적용)
+# 🖼️ 이미지 출력 헬퍼 함수
 def render_question_image(row_data):
     img_path = row_data.get('이미지')
     if img_path and str(img_path).strip() != "":
@@ -196,7 +223,7 @@ if st.session_state['active_tab_index'] == 0:
     if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
         st.info(f"🚨 현재 **[{st.session_state['target_weak_major']}]** 파트 집중 공략 모드입니다!")
     else:
-        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 AI의 채점 결과와 모범 답안을 즉시 확인하는 모드입니다.")
+        st.markdown("#### 💡 한 문제씩 집중적으로 풀고 딥러닝 채점과 AI 해설을 즉시 확인하는 모드입니다.")
     
     q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
     if not q_list:
@@ -213,16 +240,19 @@ if st.session_state['active_tab_index'] == 0:
 
         st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {q_major}  |  중단원: {q_sub}**\n\n{selected_q}")
         
-        # 그림 출력
         render_question_image(row_data)
 
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
-        if st.button("🤖 AI 채점 요청하기", type="primary"):
+        if st.button("🤖 딥러닝 채점 및 AI 해설 요청", type="primary"):
             if not user_ans:
                 st.warning("답안을 입력해주세요!")
             else:
-                with st.spinner("AI 채점 중..."):
+                with st.spinner("🧠 딥러닝 모델(SBERT)로 의미 유사도를 분석하고 AI 해설을 생성 중입니다..."):
+                    # 1. 딥러닝 모델로 1차 수학적 유사도 점수 산출
+                    dl_score = calculate_deep_learning_score(user_ans, correct_answer)
+                    
+                    # 2. 딥러닝 점수와 데이터를 LLM에게 넘겨서 고품질 피드백 생성
                     prompt = f"""
                     너는 건축기사 실기 수석 채점관이야.
                     [출제 연도]: {question_year}
@@ -230,10 +260,11 @@ if st.session_state['active_tab_index'] == 0:
                     [모범 답안]: {correct_answer}
                     [상세 해설]: {explanation}
                     [학생 답안]: {user_ans}
+                    [Ko-SBERT 딥러닝 모델 계산 유사도 점수]: {dl_score}점
                     
-                    * 주의: 피드백이나 해설을 작성할 때 \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기 기호는 x 또는 *를 쓰고, 단위는 m^3 등 일반 텍스트 형태로만 작성해 주세요.
+                    * 주의: \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기 기호는 x 또는 *를 쓰고, 단위는 m^3 등 일반 텍스트 형태로만 작성해 주세요.
                     
-                    핵심 키워드 포함 여부를 엄격히 평가해 0~100점의 점수를 매기고 피드백해줘.
+                    위의 딥러닝 점수({dl_score}점)를 참고하되, 학생 답안의 완성도를 종합적으로 검토하여 최종 점수와 상세 피드백을 작성해줘.
                     반드시 아래 형식으로 출력할 것:
                     1. 최종 점수: XX점
                     2. 키워드 포함 여부: (...)
@@ -245,6 +276,9 @@ if st.session_state['active_tab_index'] == 0:
                     )
                     result_text = response.choices[0].message.content
                     score = extract_score(result_text)
+                    # 만약 LLM이 점수를 못 뽑아냈다면 딥러닝 점수를 우선 적용 가능
+                    if score == 0 and dl_score > 0:
+                        score = dl_score
 
                     st.session_state['last_graded'] = {
                         "question": selected_q,
@@ -264,13 +298,13 @@ if st.session_state['active_tab_index'] == 0:
                         if not file_exists:
                             writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
                         writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
-                    st.success("채점 완료 및 오답노트 저장 완료!")
+                    st.success("딥러닝 채점 완료 및 오답노트 저장 완료!")
 
         if 'last_graded' in st.session_state and st.session_state['last_graded']['question'] == selected_q:
             lg = st.session_state['last_graded']
             st.markdown("---")
             st.markdown("### 📋 채점 결과 및 정답 확인")
-            st.info(f"**점수: {lg['score']}점**")
+            st.info(f"**최종 점수: {lg['score']}점**")
             st.markdown(lg['result_text'])
             
             st.success(f"**📖 모범 답안**\n\n{lg['correct_answer']}")
@@ -335,7 +369,6 @@ elif st.session_state['active_tab_index'] == 1:
             q_year = row.get('년도', '정보 없음')
             st.markdown(f"**Q{idx+1}. [{q_year} | {row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
             
-            # 그림 출력
             render_question_image(row)
 
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
@@ -350,8 +383,8 @@ elif st.session_state['active_tab_index'] == 1:
             }
             st.markdown("---")
 
-        if st.button("📝 전체 답안 일괄 채점 및 저장하기", type="primary", use_container_width=True):
-            with st.spinner("🤖 AI가 전체 답안을 채점 중입니다..."):
+        if st.button("📝 전체 답안 일괄 딥러닝 채점 및 저장하기", type="primary", use_container_width=True):
+            with st.spinner("🧠 딥러닝 및 AI가 전체 답안을 채점 중입니다..."):
                 file_name = 'results.csv'
                 file_exists = os.path.isfile(file_name)
                 batch_results = []
@@ -360,15 +393,19 @@ elif st.session_state['active_tab_index'] == 1:
                     if not data["user_ans"]:
                         continue
                     
+                    # 딥러닝 점수 선산출
+                    dl_score = calculate_deep_learning_score(data['user_ans'], data['correct'])
+                    
                     prompt = f"""
                     너는 건축기사 실기 수석 채점관이야.
                     [문제]: {data['question']}
                     [모범 답안]: {data['correct']}
                     [학생 답안]: {data['user_ans']}
+                    [Ko-SBERT 딥러닝 유사도 점수]: {dl_score}점
                     
                     * 주의: \\times, \\text 같은 LaTeX 수식 문법은 절대로 사용하지 마세요. 곱하기 기호는 x 또는 *를 쓰고 단위는 m^3 등 일반 텍스트로만 쓰세요.
                     
-                    핵심 키워드가 포함되었는지 엄격하게 평가하여 0~100점의 점수를 부여하고 피드백을 줘.
+                    딥러닝 점수를 참고하여 핵심 키워드가 포함되었는지 엄격하게 평가하여 최종 점수와 피드백을 줘.
                     반드시 아래 형식으로 출력할 것:
                     1. 최종 점수: XX점
                     2. 피드백: (간단한 평가 및 누락된 키워드)
@@ -381,9 +418,11 @@ elif st.session_state['active_tab_index'] == 1:
                         )
                         res_text = response.choices[0].message.content
                         score = extract_score(res_text)
+                        if score == 0 and dl_score > 0:
+                            score = dl_score
                     except Exception as e:
                         res_text = f"채점 오류: {str(e)}"
-                        score = 0
+                        score = dl_score
                         
                     batch_results.append({
                         "question": data['question'], 
@@ -401,9 +440,9 @@ elif st.session_state['active_tab_index'] == 1:
                             file_exists = True
                         writer.writerow([data['question'], data['major'], data['sub'], data['year'], data['user_ans'], score, res_text.replace('\n', ' ')])
 
-                st.success("🎉 일괄 채점이 완료되었습니다!")
+                st.success("🎉 일괄 딥러닝 채점이 완료되었습니다!")
                 for res in batch_results:
-                    with st.expander(f"📌 [점수: {res['score']}점] {res['question'][:35]}..."):
+                    with st.expander(f"📌 [최종 점수: {res['score']}점] {res['question'][:35]}..."):
                         st.markdown(f"**내 답안:** {res['user_ans']}")
                         st.markdown(f"**AI 채점 결과:**\n{res['result']}")
                         st.markdown("---")
